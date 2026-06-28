@@ -10,7 +10,7 @@
 ## Table of Contents
 
 - [What It Does](#what-it-does)
-- [Architecture Overview](#architecture-overview)
+- [Architecture Overview](#architecture-overview) (See also [ARCHITECTURE.md](ARCHITECTURE.md))
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 - [Local Development Setup](#local-development-setup)
@@ -74,7 +74,9 @@
 ```
 
 **Key design principle:** Each event = its own isolated Fargate task (or Docker container locally).
-The control plane spawns and manages them. 100 events = 100 containers.
+The control plane spawns and manages them. 100 events = 100 containers. 
+
+For a deep dive into how data isolation, networking, and the proxy work, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
