@@ -55,8 +55,10 @@
   <!-- Lightbox -->
   <div id="lightbox" class="lightbox">
     <button class="lightbox__close" onclick="closeLightbox()">✕</button>
-    <img id="lightbox-img" src="" alt="Photo">
-    <div id="lightbox-actions" style="margin-top:12px;display:flex;gap:8px;"></div>
+    <button style="position:absolute;left:16px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.5);color:white;border:none;font-size:2rem;padding:8px 16px;border-radius:8px;cursor:pointer;z-index:100;" onclick="event.stopPropagation(); navigateLightbox(-1)">‹</button>
+    <button style="position:absolute;right:16px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.5);color:white;border:none;font-size:2rem;padding:8px 16px;border-radius:8px;cursor:pointer;z-index:100;" onclick="event.stopPropagation(); navigateLightbox(1)">›</button>
+    <img id="lightbox-img" src="" alt="Photo" onclick="event.stopPropagation()">
+    <div id="lightbox-actions" style="margin-top:12px;display:flex;gap:8px;" onclick="event.stopPropagation()"></div>
   </div>
 
   <script src="/static/js/api.js"></script>
@@ -141,13 +143,13 @@
         item.innerHTML = `
           <img src="${photo.url}" alt="${escHtml(photo.original_name || 'Photo')}" loading="lazy">
           <div class="gallery__overlay">
-            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation();openLightbox('${photo.id}','${escHtml(photo.url)}')">View</button>
+            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation();openLightbox('${photo.id}')">View</button>
             ${permission === 'VIEW_UPLOAD_DELETE'
               ? `<button class="btn btn--danger btn--sm" onclick="event.stopPropagation();deletePhoto('${photo.id}')">Delete</button>`
               : ''}
           </div>
         `;
-        item.addEventListener('click', () => openLightbox(photo.id, photo.url));
+        item.addEventListener('click', () => openLightbox(photo.id));
         gallery.appendChild(item);
       });
     }
@@ -167,7 +169,7 @@
         fd.append('file', file);
         try {
           const res = await ParticipantAPI.upload(`/e/${eventCode}/photos`, fd);
-          photos.unshift({ id: res.id, url: res.url, original_name: file.name, content_type: file.type, uploaded_at: new Date().toISOString() });
+          photos.unshift({ id: res.id, url: res.url, download_url: res.download_url, original_name: file.name, content_type: file.type, uploaded_at: new Date().toISOString() });
           done++;
           fill.style.width = `${Math.round((done / files.length) * 100)}%`;
         } catch (err) {
@@ -195,15 +197,27 @@
     }
 
     // ── Lightbox ───────────────────────────────────────────────────────────
-    function openLightbox(id, url) {
+    function openLightbox(id) {
       currentPhotoId = id;
-      document.getElementById('lightbox-img').src = url;
+      const photo = photos.find(p => p.id === id);
+      if (!photo) return;
+      document.getElementById('lightbox-img').src = photo.url;
       const actions = document.getElementById('lightbox-actions');
-      actions.innerHTML = `<a href="${url}" download class="btn btn--ghost btn--sm">↓ Download</a>`;
+      actions.innerHTML = `<a href="${photo.download_url}" class="btn btn--ghost btn--sm">↓ Download</a>`;
       if (permission === 'VIEW_UPLOAD_DELETE') {
         actions.innerHTML += `<button class="btn btn--danger btn--sm" onclick="deletePhoto('${id}')">Delete</button>`;
       }
       document.getElementById('lightbox').classList.add('active');
+    }
+
+    function navigateLightbox(dir) {
+      if (!photos.length || !currentPhotoId) return;
+      const idx = photos.findIndex(p => p.id === currentPhotoId);
+      if (idx === -1) return;
+      let newIdx = idx + dir;
+      if (newIdx < 0) newIdx = photos.length - 1;
+      if (newIdx >= photos.length) newIdx = 0;
+      openLightbox(photos[newIdx].id);
     }
 
     function closeLightbox() {
@@ -216,7 +230,10 @@
     });
 
     document.addEventListener('keydown', (e) => {
+      if (!document.getElementById('lightbox').classList.contains('active')) return;
       if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowLeft') navigateLightbox(-1);
+      if (e.key === 'ArrowRight') navigateLightbox(1);
     });
 
     function escHtml(s) {

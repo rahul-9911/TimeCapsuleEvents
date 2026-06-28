@@ -57,7 +57,7 @@ async def delete_photo(s3_key: str) -> None:
     get_s3().delete_object(Bucket=BUCKET, Key=s3_key)
 
 
-def get_presigned_url(s3_key: str, expires: int = 3600) -> str:
+def get_presigned_url(s3_key: str, expires: int = 3600, download_filename: str = None) -> str:
     """Generate a pre-signed GET URL valid for `expires` seconds."""
     client = get_s3()
     if ENDPOINT == "http://minio:9000":
@@ -70,8 +70,12 @@ def get_presigned_url(s3_key: str, expires: int = 3600) -> str:
             config=Config(signature_version="s3v4"),
         )
         
+    params = {"Bucket": BUCKET, "Key": s3_key}
+    if download_filename:
+        params["ResponseContentDisposition"] = f'attachment; filename="{download_filename}"'
+
     return client.generate_presigned_url(
         "get_object",
-        Params={"Bucket": BUCKET, "Key": s3_key},
+        Params=params,
         ExpiresIn=expires,
     )

@@ -142,6 +142,7 @@ async def list_photos(
         PhotoOut(
             id=row["id"],
             url=get_presigned_url(row["s3_key"]),
+            download_url=get_presigned_url(row["s3_key"], download_filename=row["original_name"]),
             original_name=row["original_name"],
             content_type=row["content_type"],
             uploaded_at=row["uploaded_at"],
@@ -178,7 +179,11 @@ async def upload_photo(
     ip = request.client.host if request.client else None
     await _log(db, ac["id"], "UPLOAD", photo_id, ip)
 
-    return {"id": photo_id, "url": get_presigned_url(s3_key)}
+    return {
+        "id": photo_id, 
+        "url": get_presigned_url(s3_key),
+        "download_url": get_presigned_url(s3_key, download_filename=file.filename)
+    }
 
 
 # ── Participant: Delete photo ─────────────────────────────────────────────────

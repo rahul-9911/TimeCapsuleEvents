@@ -25,6 +25,7 @@ class CodeOutInternal(BaseModel):
 class PhotoOut(BaseModel):
     id: str
     url: str
+    download_url: str
     original_name: Optional[str]
     content_type: str
     uploaded_at: datetime
