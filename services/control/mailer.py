@@ -1,15 +1,48 @@
 """
-Control Plane — Gmail SMTP magic link sender
+Control Plane — Magic link sender
+Supports two modes:
+  - Console (default / dev): prints the link to stdout — no email config needed
+  - Gmail SMTP: set SMTP_USER + SMTP_PASS in .env to enable real emails
 """
+import logging
 import os
 import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+logger = logging.getLogger(__name__)
+
+_PLACEHOLDER = "your-gmail@gmail.com"
+
+
+def _is_smtp_configured() -> bool:
+    user = os.getenv("SMTP_USER", "")
+    pw   = os.getenv("SMTP_PASS", "")
+    return bool(user and pw and user != _PLACEHOLDER and pw != "your-gmail-app-password")
+
 
 def send_magic_link(to_email: str, magic_link: str) -> None:
-    """Send a magic login link via Gmail SMTP SSL."""
+    """Send a magic login link — console fallback if SMTP not configured."""
+    if not _is_smtp_configured():
+        _console_fallback(to_email, magic_link)
+        return
+    _send_via_smtp(to_email, magic_link)
+
+
+def _console_fallback(to_email: str, magic_link: str) -> None:
+    """Print the magic link to stdout (visible in `docker compose logs control`)."""
+    banner = "\n" + "="*60
+    banner += f"\n  🔗 MAGIC LINK (console mode — no email sent)"
+    banner += f"\n  To:   {to_email}"
+    banner += f"\n  Link: {magic_link}"
+    banner += "\n" + "="*60
+    logger.warning(banner)
+    print(banner, flush=True)
+
+
+def _send_via_smtp(to_email: str, magic_link: str) -> None:
+    """Send via Gmail SMTP SSL."""
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "465"))
     smtp_user = os.getenv("SMTP_USER", "")

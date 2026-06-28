@@ -59,8 +59,11 @@ async def delete_photo(s3_key: str) -> None:
 
 def get_presigned_url(s3_key: str, expires: int = 3600) -> str:
     """Generate a pre-signed GET URL valid for `expires` seconds."""
-    return get_s3().generate_presigned_url(
+    url = get_s3().generate_presigned_url(
         "get_object",
         Params={"Bucket": BUCKET, "Key": s3_key},
         ExpiresIn=expires,
     )
+    if ENDPOINT == "http://minio:9000":
+        url = url.replace("http://minio:9000", "http://localhost:9000")
+    return url

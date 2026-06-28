@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import RedirectResponse
 
 from db import get_pool
-from email import send_magic_link
+from mailer import send_magic_link
 from middleware import generate_token
 from models import MagicLinkRequest, MagicLinkResponse
 
@@ -19,7 +19,7 @@ router = APIRouter(tags=["auth"])
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost")
 TOKEN_TTL_MINUTES = 15
-SESSION_TTL_HOURS = 24 * 7  # 7 days
+SESSION_TTL_HOURS = 24 * 30  # 30 days
 
 
 @router.post("/request", response_model=MagicLinkResponse)

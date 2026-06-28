@@ -56,6 +56,11 @@
 
   <script src="/static/js/api.js"></script>
   <script>
+    // Auto-redirect if already logged in
+    API.get('/api/events')
+      .then(() => { window.location.href = '/dashboard.html'; })
+      .catch(() => { /* not logged in, stay here */ });
+
     const form    = document.getElementById('login-form');
     const alert   = document.getElementById('alert');
     const success = document.getElementById('success-msg');
