@@ -59,11 +59,19 @@ async def delete_photo(s3_key: str) -> None:
 
 def get_presigned_url(s3_key: str, expires: int = 3600) -> str:
     """Generate a pre-signed GET URL valid for `expires` seconds."""
-    url = get_s3().generate_presigned_url(
+    client = get_s3()
+    if ENDPOINT == "http://minio:9000":
+        # For presigned URLs, the endpoint MUST match what the browser uses,
+        # otherwise the Host header won't match the AWS v4 signature.
+        client = boto3.client(
+            "s3",
+            region_name=REGION,
+            endpoint_url="http://localhost:9000",
+            config=Config(signature_version="s3v4"),
+        )
+        
+    return client.generate_presigned_url(
         "get_object",
         Params={"Bucket": BUCKET, "Key": s3_key},
         ExpiresIn=expires,
     )
-    if ENDPOINT == "http://minio:9000":
-        url = url.replace("http://minio:9000", "http://localhost:9000")
-    return url
