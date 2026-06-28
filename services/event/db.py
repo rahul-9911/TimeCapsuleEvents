@@ -6,7 +6,8 @@ import os
 import aiosqlite
 from typing import Optional
 
-DB_PATH = os.path.join(os.getenv("EFS_MOUNT", "/data"), "event.db")
+EVENT_CODE = os.getenv("EVENT_CODE", "UNKNOWN")
+DB_PATH = os.path.join(os.getenv("EFS_MOUNT", "/data"), f"{EVENT_CODE}_event.db")
 
 _conn: Optional[aiosqlite.Connection] = None
 

@@ -31,6 +31,48 @@ async def stop_event(event_code: str, task_arn: str | None = None) -> None:
     else:
         await _stop_ecs(task_arn)
 
+async def cleanup_event_data(event_code: str) -> None:
+    """Delete the SQLite database file and S3 folder for an event."""
+    # 1. Delete SQLite DB File
+    efs_local = os.getenv("EFS_MOUNT", "/efs")
+    db_path = os.path.join(efs_local, f"{event_code}_event.db")
+    try:
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        if os.path.exists(f"{db_path}-wal"):
+            os.remove(f"{db_path}-wal")
+        if os.path.exists(f"{db_path}-shm"):
+            os.remove(f"{db_path}-shm")
+        logger.info("Deleted DB file %s", db_path)
+    except Exception as e:
+        logger.error("Failed to delete DB file %s: %s", db_path, e)
+
+    # 2. Delete S3 Prefix
+    import boto3
+    from botocore.config import Config
+    
+    bucket = os.getenv("S3_BUCKET", "snapevent-dev")
+    prefix = f"events/{event_code}/"
+    endpoint = os.getenv("S3_ENDPOINT", "http://minio:9000")
+    
+    kwargs = {
+        "region_name": os.getenv("S3_REGION", "us-east-1"),
+        "config": Config(signature_version="s3v4")
+    }
+    if endpoint:
+        kwargs["endpoint_url"] = endpoint
+        
+    try:
+        s3 = boto3.client("s3", **kwargs)
+        paginator = s3.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    s3.delete_object(Bucket=bucket, Key=obj['Key'])
+        logger.info("Deleted S3 prefix %s", prefix)
+    except Exception as e:
+        logger.error("Failed to delete S3 prefix %s: %s", prefix, e)
+
 
 def get_event_internal_url(event_code: str) -> str:
     """

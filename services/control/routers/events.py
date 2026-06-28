@@ -42,6 +42,14 @@ async def create_event(
 ):
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Check for duplicate event name
+        existing = await conn.fetchval(
+            "SELECT 1 FROM event_registry WHERE event_name = $1 AND organiser_id = $2",
+            body.event_name, organiser["organiser_id"]
+        )
+        if existing:
+            raise HTTPException(400, "You already have an event with this name.")
+
         code = await _unique_code(conn)
 
         event = await conn.fetchrow(
@@ -161,6 +169,12 @@ async def delete_event(event_id: str, organiser: dict = Depends(get_current_orga
 
         await conn.execute("DELETE FROM event_registry WHERE id=$1", event_id)
 
-    # Stop the container in the background
+    # Stop the container and cleanup data in the background
     import asyncio
-    asyncio.create_task(stop_event(row["event_code"], row["task_arn"]))
+    from spawner import cleanup_event_data
+    
+    async def _stop_and_cleanup(code: str, task: str | None):
+        await stop_event(code, task)
+        await cleanup_event_data(code)
+        
+    asyncio.create_task(_stop_and_cleanup(row["event_code"], row["task_arn"]))
