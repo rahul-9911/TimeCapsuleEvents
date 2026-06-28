@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SnapEvent — Sign In</title>
+  <meta name="description" content="Sign in to your SnapEvent organiser dashboard with your email.">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="centered-page">
+    <div style="width:100%;max-width:420px;">
+
+      <div style="text-align:center;margin-bottom:40px;">
+        <div style="font-size:2rem;font-weight:800;letter-spacing:-0.04em;margin-bottom:8px;">
+          Snap<span style="color:var(--accent)">Event</span>
+        </div>
+        <p class="text-muted">Event photo sharing — simple &amp; private</p>
+      </div>
+
+      <div class="card">
+        <h1 style="font-size:1.1rem;font-weight:600;margin-bottom:6px;">Sign in to your dashboard</h1>
+        <p class="text-muted" style="margin-bottom:24px;font-size:0.85rem;">
+          We'll email you a magic link — no password needed.
+        </p>
+
+        <div id="alert" class="alert"></div>
+        <div id="success-msg" style="display:none;text-align:center;padding:20px 0;">
+          <div style="font-size:2rem;margin-bottom:12px;">📬</div>
+          <p style="font-weight:500;margin-bottom:6px;">Check your inbox</p>
+          <p class="text-muted" style="font-size:0.85rem;">We sent a magic link to <strong id="sent-to"></strong></p>
+        </div>
+
+        <form id="login-form">
+          <div class="form-group">
+            <label for="email">Email address</label>
+            <input
+              id="email"
+              type="email"
+              placeholder="you@example.com"
+              required
+              autocomplete="email"
+            >
+          </div>
+          <button id="submit-btn" type="submit" class="btn btn--primary btn--full btn--lg">
+            Send magic link
+          </button>
+        </form>
+      </div>
+
+      <p class="text-muted text-center mt-md" style="font-size:0.78rem;">
+        Have a participant code? <a href="/join.html">Join an event →</a>
+      </p>
+    </div>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script>
+    const form    = document.getElementById('login-form');
+    const alert   = document.getElementById('alert');
+    const success = document.getElementById('success-msg');
+    const sentTo  = document.getElementById('sent-to');
+    const btn     = document.getElementById('submit-btn');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideAlert(alert);
+      const email = document.getElementById('email').value.trim();
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+
+      try {
+        await API.post('/auth/request', { email });
+        form.style.display = 'none';
+        sentTo.textContent = email;
+        success.style.display = 'block';
+      } catch (err) {
+        showAlert(alert, err.message);
+        btn.disabled = false;
+        btn.textContent = 'Send magic link';
+      }
+    });
+  </script>
+</body>
+</html>

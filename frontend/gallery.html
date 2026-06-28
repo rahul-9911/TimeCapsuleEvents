@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SnapEvent — Gallery</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .toolbar__title { font-weight: 600; font-size: 1rem; }
+    .toolbar__code  { font-size: 0.75rem; color: var(--text-muted); font-family: monospace; }
+    .toolbar__spacer{ flex: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <span class="navbar__brand" style="font-size:1rem;">Snap<span style="color:var(--accent)">Event</span></span>
+    <span class="toolbar__title" id="toolbar-event-name">Loading…</span>
+    <span class="toolbar__code" id="toolbar-code"></span>
+    <div class="toolbar__spacer"></div>
+    <div id="upload-btn-wrap" style="display:none;">
+      <button class="btn btn--primary btn--sm" onclick="document.getElementById('file-input').click()">
+        ↑ Upload Photos
+      </button>
+      <input id="file-input" type="file" accept="image/*" multiple style="display:none">
+    </div>
+  </div>
+
+  <!-- Progress bar for upload -->
+  <div id="upload-progress" class="progress-bar" style="margin:0;border-radius:0;">
+    <div id="upload-fill" class="progress-bar__fill"></div>
+  </div>
+
+  <div class="container container--wide" style="padding-top:24px;padding-bottom:40px;">
+    <div id="alert" class="alert" style="margin-bottom:16px;"></div>
+    <div id="upload-status" class="alert alert--info" style="margin-bottom:16px;"></div>
+
+    <!-- Gallery -->
+    <div id="gallery" class="gallery"></div>
+    <div id="empty" class="empty-state" style="display:none;">
+      <h3>No photos yet</h3>
+      <p id="empty-hint">Be the first to upload!</p>
+    </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="lightbox">
+    <button class="lightbox__close" onclick="closeLightbox()">✕</button>
+    <img id="lightbox-img" src="" alt="Photo">
+    <div id="lightbox-actions" style="margin-top:12px;display:flex;gap:8px;"></div>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script>
+    let participantCode = sessionStorage.getItem('participant_code') || '';
+    let eventCode       = '';
+    let permission      = '';
+    let photos          = [];
+    let currentPhotoId  = null;
+
+    if (!participantCode) {
+      window.location.href = '/join.html';
+    }
+
+    ParticipantAPI.setCode(participantCode);
+
+    // ── Boot: discover event from participant code ─────────────────────────
+    async function boot() {
+      // We need to know the event code to build the URL.
+      // Strategy: try a known path format. The control plane proxy routes
+      // /e/{event_code}/* → event container. But from the participant side
+      // we only have the access code. We call a discovery endpoint on the
+      // control plane.
+      try {
+        const info = await fetch('/api/participant/discover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Participant-Code': participantCode },
+          credentials: 'include',
+        });
+        if (!info.ok) throw new Error('Invalid or expired access code');
+        const data = await info.json();
+        eventCode  = data.event_code;
+        permission = data.permission;
+        setupUI();
+        await loadPhotos();
+      } catch (err) {
+        showAlert(document.getElementById('alert'), err.message);
+        document.getElementById('toolbar-event-name').textContent = 'Error';
+      }
+    }
+
+    function setupUI() {
+      document.getElementById('toolbar-event-name').textContent = eventCode;
+      document.getElementById('toolbar-code').textContent = `Code: ${participantCode}`;
+      document.title = `SnapEvent — ${eventCode}`;
+
+      if (permission === 'VIEW_UPLOAD' || permission === 'VIEW_UPLOAD_DELETE') {
+        document.getElementById('upload-btn-wrap').style.display = 'block';
+      }
+
+      if (permission === 'VIEW_ONLY') {
+        document.getElementById('empty-hint').textContent = 'No photos have been uploaded yet.';
+      }
+
+      // File input handler
+      document.getElementById('file-input').addEventListener('change', (e) => {
+        uploadFiles(Array.from(e.target.files));
+        e.target.value = '';
+      });
+    }
+
+    // ── Photos ─────────────────────────────────────────────────────────────
+    async function loadPhotos() {
+      try {
+        photos = await ParticipantAPI.get(`/e/${eventCode}/photos`);
+        renderGallery();
+      } catch (err) {
+        showAlert(document.getElementById('alert'), 'Failed to load photos: ' + err.message);
+      }
+    }
+
+    function renderGallery() {
+      const gallery = document.getElementById('gallery');
+      const empty   = document.getElementById('empty');
+      gallery.innerHTML = '';
+      if (!photos.length) { empty.style.display = 'block'; return; }
+      empty.style.display = 'none';
+
+      photos.forEach(photo => {
+        const item = document.createElement('div');
+        item.className = 'gallery__item';
+        item.innerHTML = `
+          <img src="${photo.url}" alt="${escHtml(photo.original_name || 'Photo')}" loading="lazy">
+          <div class="gallery__overlay">
+            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation();openLightbox('${photo.id}','${escHtml(photo.url)}')">View</button>
+            ${permission === 'VIEW_UPLOAD_DELETE'
+              ? `<button class="btn btn--danger btn--sm" onclick="event.stopPropagation();deletePhoto('${photo.id}')">Delete</button>`
+              : ''}
+          </div>
+        `;
+        item.addEventListener('click', () => openLightbox(photo.id, photo.url));
+        gallery.appendChild(item);
+      });
+    }
+
+    // ── Upload ─────────────────────────────────────────────────────────────
+    async function uploadFiles(files) {
+      if (!files.length) return;
+      const progress = document.getElementById('upload-progress');
+      const fill     = document.getElementById('upload-fill');
+      const status   = document.getElementById('upload-status');
+      progress.classList.add('show');
+      showAlert(status, `Uploading ${files.length} photo${files.length > 1 ? 's' : ''}…`, 'info');
+
+      let done = 0;
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+          const res = await ParticipantAPI.upload(`/e/${eventCode}/photos`, fd);
+          photos.unshift({ id: res.id, url: res.url, original_name: file.name, content_type: file.type, uploaded_at: new Date().toISOString() });
+          done++;
+          fill.style.width = `${Math.round((done / files.length) * 100)}%`;
+        } catch (err) {
+          showAlert(document.getElementById('alert'), `Failed to upload ${file.name}: ${err.message}`);
+        }
+      }
+
+      progress.classList.remove('show');
+      fill.style.width = '0%';
+      status.className = 'alert';
+      renderGallery();
+    }
+
+    // ── Delete ─────────────────────────────────────────────────────────────
+    async function deletePhoto(photoId) {
+      if (!confirm('Delete this photo? This cannot be undone.')) return;
+      try {
+        await ParticipantAPI.del(`/e/${eventCode}/photos/${photoId}`);
+        photos = photos.filter(p => p.id !== photoId);
+        closeLightbox();
+        renderGallery();
+      } catch (err) {
+        showAlert(document.getElementById('alert'), 'Delete failed: ' + err.message);
+      }
+    }
+
+    // ── Lightbox ───────────────────────────────────────────────────────────
+    function openLightbox(id, url) {
+      currentPhotoId = id;
+      document.getElementById('lightbox-img').src = url;
+      const actions = document.getElementById('lightbox-actions');
+      actions.innerHTML = `<a href="${url}" download class="btn btn--ghost btn--sm">↓ Download</a>`;
+      if (permission === 'VIEW_UPLOAD_DELETE') {
+        actions.innerHTML += `<button class="btn btn--danger btn--sm" onclick="deletePhoto('${id}')">Delete</button>`;
+      }
+      document.getElementById('lightbox').classList.add('active');
+    }
+
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('active');
+      document.getElementById('lightbox-img').src = '';
+    }
+
+    document.getElementById('lightbox').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('lightbox')) closeLightbox();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeLightbox();
+    });
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    boot();
+  </script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SnapEvent — Join Event</title>
+  <meta name="description" content="Enter your event code to access photos.">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="centered-page">
+    <div style="width:100%;max-width:400px;">
+
+      <div style="text-align:center;margin-bottom:36px;">
+        <div style="font-size:2rem;font-weight:800;letter-spacing:-0.04em;margin-bottom:8px;">
+          Snap<span style="color:var(--accent)">Event</span>
+        </div>
+        <p class="text-muted">Enter your access code to view the event</p>
+      </div>
+
+      <div class="card">
+        <div id="alert" class="alert"></div>
+        <form id="join-form">
+          <div class="form-group">
+            <label for="code-input">Your Access Code</label>
+            <input
+              id="code-input"
+              type="text"
+              placeholder="e.g. ABC12345"
+              maxlength="12"
+              autocomplete="off"
+              autocapitalize="characters"
+              style="font-size:1.4rem;letter-spacing:0.1em;text-align:center;text-transform:uppercase;"
+              required
+            >
+          </div>
+          <button id="join-btn" type="submit" class="btn btn--primary btn--full btn--lg" style="margin-top:8px;">
+            Access Event →
+          </button>
+        </form>
+      </div>
+
+      <p class="text-muted text-center mt-md" style="font-size:0.78rem;">
+        Organising an event? <a href="/login.html">Sign in →</a>
+      </p>
+    </div>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script>
+    // Pre-fill code from URL query param if present (?code=ABC123)
+    const params = new URLSearchParams(location.search);
+    if (params.get('code')) {
+      document.getElementById('code-input').value = params.get('code').toUpperCase();
+    }
+
+    document.getElementById('join-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const code  = document.getElementById('code-input').value.trim().toUpperCase();
+      const btn   = document.getElementById('join-btn');
+      const alert = document.getElementById('alert');
+      hideAlert(alert);
+      btn.disabled = true; btn.textContent = 'Checking…';
+
+      try {
+        // We don't know the event_code (URL slug) yet — the gallery page will
+        // discover it by calling the event info endpoint with the participant code.
+        // Store participant code in sessionStorage and redirect to gallery.
+        sessionStorage.setItem('participant_code', code);
+        window.location.href = `/gallery.html`;
+      } catch (err) {
+        showAlert(alert, err.message);
+        btn.disabled = false; btn.textContent = 'Access Event →';
+      }
+    });
+  </script>
+</body>
+</html>

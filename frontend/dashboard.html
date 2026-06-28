@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SnapEvent — Dashboard</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <nav class="navbar">
+    <span class="navbar__brand">Snap<span>Event</span></span>
+    <div class="navbar__actions">
+      <span id="organiser-email" class="text-muted" style="font-size:0.82rem;"></span>
+      <button class="btn btn--ghost btn--sm" onclick="logout()">Sign out</button>
+    </div>
+  </nav>
+
+  <div class="container" style="padding-top:0;">
+    <div class="page-header">
+      <div>
+        <h1>Your Events</h1>
+        <p>Create and manage your photo sharing events.</p>
+      </div>
+      <button class="btn btn--primary" onclick="openCreateModal()">+ New Event</button>
+    </div>
+
+    <div id="alert" class="alert"></div>
+    <div id="events-grid" class="grid grid--2"></div>
+    <div id="empty" class="empty-state" style="display:none;">
+      <h3>No events yet</h3>
+      <p>Create your first event to get started.</p>
+      <button class="btn btn--primary mt-md" onclick="openCreateModal()">+ New Event</button>
+    </div>
+  </div>
+
+  <!-- Create Event Modal -->
+  <div id="create-modal" class="modal-backdrop">
+    <div class="modal">
+      <h2>Create New Event</h2>
+      <div id="create-alert" class="alert"></div>
+      <form id="create-form">
+        <div class="form-group">
+          <label for="ev-name">Event Name *</label>
+          <input id="ev-name" type="text" placeholder="Sarah's 30th Birthday" required>
+        </div>
+        <div class="form-group">
+          <label for="ev-desc">Description</label>
+          <input id="ev-desc" type="text" placeholder="Optional notes">
+        </div>
+        <div class="form-group">
+          <label for="ev-date">Event Date</label>
+          <input id="ev-date" type="date">
+        </div>
+        <div class="flex mt-md" style="gap:12px;">
+          <button type="button" class="btn btn--ghost btn--full" onclick="closeCreateModal()">Cancel</button>
+          <button id="create-btn" type="submit" class="btn btn--primary btn--full">Create Event</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script>
+    let events = [];
+
+    async function load() {
+      try {
+        events = await API.get('/api/events');
+        render();
+      } catch (err) {
+        showAlert(document.getElementById('alert'), 'Failed to load events: ' + err.message);
+      }
+    }
+
+    function render() {
+      const grid  = document.getElementById('events-grid');
+      const empty = document.getElementById('empty');
+      grid.innerHTML = '';
+      if (!events.length) { empty.style.display = 'block'; return; }
+      empty.style.display = 'none';
+      events.forEach(ev => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.cursor = 'pointer';
+        card.innerHTML = `
+          <div class="flex-between" style="margin-bottom:12px;">
+            <span class="card__title">${escHtml(ev.event_name)}</span>
+            ${statusBadge(ev.status)}
+          </div>
+          <p class="card__meta">${ev.event_date ? 'Date: ' + ev.event_date : 'No date set'}</p>
+          ${ev.description ? `<p class="text-muted mt-sm" style="font-size:0.82rem;">${escHtml(ev.description)}</p>` : ''}
+          <p class="text-muted mt-sm" style="font-size:0.78rem;">Created ${formatDate(ev.created_at)}</p>
+          <div class="flex mt-md" style="gap:8px;">
+            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation();goEvent('${ev.id}')">Manage →</button>
+            <button class="btn btn--danger btn--sm" onclick="event.stopPropagation();deleteEvent('${ev.id}', '${escHtml(ev.event_name)}')">Delete</button>
+          </div>
+        `;
+        card.addEventListener('click', () => goEvent(ev.id));
+        grid.appendChild(card);
+      });
+    }
+
+    function goEvent(id) {
+      window.location.href = `/event-manage.html?id=${id}`;
+    }
+
+    async function deleteEvent(id, name) {
+      if (!confirm(`Delete event "${name}"? This stops the container and cannot be undone.`)) return;
+      try {
+        await API.del(`/api/events/${id}`);
+        events = events.filter(e => e.id !== id);
+        render();
+      } catch (err) {
+        showAlert(document.getElementById('alert'), 'Delete failed: ' + err.message);
+      }
+    }
+
+    function openCreateModal()  { document.getElementById('create-modal').classList.add('active'); }
+    function closeCreateModal() { document.getElementById('create-modal').classList.remove('active'); }
+
+    document.getElementById('create-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('create-btn');
+      btn.disabled = true; btn.textContent = 'Creating…';
+      hideAlert(document.getElementById('create-alert'));
+      try {
+        const ev = await API.post('/api/events', {
+          event_name:  document.getElementById('ev-name').value.trim(),
+          description: document.getElementById('ev-desc').value.trim() || null,
+          event_date:  document.getElementById('ev-date').value || null,
+        });
+        events.unshift(ev);
+        render();
+        closeCreateModal();
+        document.getElementById('create-form').reset();
+        // Redirect to manage page
+        window.location.href = `/event-manage.html?id=${ev.id}`;
+      } catch (err) {
+        showAlert(document.getElementById('create-alert'), err.message);
+        btn.disabled = false; btn.textContent = 'Create Event';
+      }
+    });
+
+    async function logout() {
+      await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+      window.location.href = '/login.html';
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    load();
+  </script>
+</body>
+</html>

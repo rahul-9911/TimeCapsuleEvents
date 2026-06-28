@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SnapEvent — Manage Event</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <nav class="navbar">
+    <a class="navbar__brand" href="/dashboard.html">Snap<span>Event</span></a>
+    <div class="navbar__actions">
+      <a href="/dashboard.html" class="btn btn--ghost btn--sm">← All Events</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 id="ev-name">Loading…</h1>
+        <p id="ev-meta" class="text-muted"></p>
+      </div>
+      <div class="flex" style="gap:10px;">
+        <span id="ev-status"></span>
+        <button class="btn btn--primary btn--sm" onclick="openCodeModal()">+ Create Code</button>
+      </div>
+    </div>
+
+    <div id="alert" class="alert"></div>
+
+    <!-- Share link -->
+    <div class="card" style="margin-bottom:24px;">
+      <p style="font-size:0.8rem;font-weight:500;color:var(--text-muted);margin-bottom:8px;">PARTICIPANT LINK</p>
+      <div class="code-display">
+        <span id="share-url" style="font-size:0.85rem;"></span>
+        <button class="btn btn--ghost btn--sm" onclick="copyToClipboard(document.getElementById('share-url').textContent, this)">Copy</button>
+      </div>
+      <p class="text-muted mt-sm" style="font-size:0.78rem;">Share this with guests — they'll be prompted to enter their individual code.</p>
+    </div>
+
+    <!-- Access Codes Table -->
+    <div class="flex-between" style="margin-bottom:12px;">
+      <h2 style="font-size:1rem;font-weight:600;">Access Codes</h2>
+      <button class="btn btn--ghost btn--sm" onclick="loadCodes()">↺ Refresh</button>
+    </div>
+    <div id="codes-wrap" class="table-wrap">
+      <table id="codes-table">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Code</th>
+            <th>Permission</th>
+            <th>Views</th>
+            <th>Uploads</th>
+            <th>Deletes</th>
+            <th>Last Seen</th>
+            <th>Share</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="codes-body">
+          <tr><td colspan="9" class="text-muted" style="text-align:center;padding:24px;">No codes yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Create Code Modal -->
+  <div id="code-modal" class="modal-backdrop">
+    <div class="modal">
+      <h2>Create Access Code</h2>
+      <div id="code-alert" class="alert"></div>
+
+      <!-- Success state -->
+      <div id="code-success" style="display:none;">
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px;">Share this link with the participant:</p>
+        <div class="code-display" style="margin-bottom:12px;">
+          <span id="new-share-url" style="font-size:0.82rem;"></span>
+          <button class="btn btn--ghost btn--sm" onclick="copyToClipboard(document.getElementById('new-share-url').textContent, this)">Copy</button>
+        </div>
+        <div class="code-display" style="margin-bottom:20px;">
+          <span>Code: <strong id="new-code-val"></strong></span>
+        </div>
+        <button class="btn btn--primary btn--full" onclick="closeCodeModal()">Done</button>
+      </div>
+
+      <!-- Form state -->
+      <form id="code-form">
+        <div class="form-group">
+          <label for="code-label">Label (optional)</label>
+          <input id="code-label" type="text" placeholder="Uncle Bob, Table 3, Press…">
+        </div>
+        <div class="form-group">
+          <label for="code-perm">Permission Level *</label>
+          <select id="code-perm" required>
+            <option value="VIEW_ONLY">View Only — browse &amp; download</option>
+            <option value="VIEW_UPLOAD">View &amp; Upload — also add photos</option>
+            <option value="VIEW_UPLOAD_DELETE">Full Access — view, upload, delete</option>
+          </select>
+        </div>
+        <div class="flex mt-md" style="gap:12px;">
+          <button type="button" class="btn btn--ghost btn--full" onclick="closeCodeModal()">Cancel</button>
+          <button id="code-btn" type="submit" class="btn btn--primary btn--full">Generate Code</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script>
+    const params  = new URLSearchParams(location.search);
+    const eventId = params.get('id');
+    if (!eventId) window.location.href = '/dashboard.html';
+
+    let eventCode = '';
+
+    async function loadEvent() {
+      try {
+        const ev = await API.get(`/api/events/${eventId}`);
+        document.title = `SnapEvent — ${ev.event_name}`;
+        document.getElementById('ev-name').textContent = ev.event_name;
+        document.getElementById('ev-status').innerHTML = statusBadge(ev.status);
+        const meta = [ev.event_date ? 'Date: ' + ev.event_date : null, 'Code: ' + ev.event_code]
+          .filter(Boolean).join(' · ');
+        document.getElementById('ev-meta').textContent = meta;
+        eventCode = ev.event_code;
+        document.getElementById('share-url').textContent = `${location.origin}/join.html`;
+      } catch (err) {
+        showAlert(document.getElementById('alert'), 'Failed to load event: ' + err.message);
+      }
+    }
+
+    async function loadCodes() {
+      try {
+        const codes = await API.get(`/api/events/${eventId}/codes`);
+        const tbody = document.getElementById('codes-body');
+        if (!codes.length) {
+          tbody.innerHTML = `<tr><td colspan="9" class="text-muted" style="text-align:center;padding:24px;">No codes yet — create one above</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = codes.map(c => `
+          <tr id="row-${c.id}" ${c.revoked ? 'style="opacity:0.45;"' : ''}>
+            <td>${c.label ? escHtml(c.label) : '<span class="text-muted">—</span>'}</td>
+            <td><code style="font-size:0.85rem;">${c.code}</code></td>
+            <td>${permissionBadge(c.permission)}</td>
+            <td>${c.views}</td>
+            <td>${c.uploads}</td>
+            <td>${c.deletes}</td>
+            <td class="text-muted" style="font-size:0.78rem;">${formatDate(c.last_seen)}</td>
+            <td>
+              <button class="btn btn--ghost btn--sm" onclick="copyToClipboard('${escHtml(c.share_url)}', this)">Copy Link</button>
+            </td>
+            <td>
+              ${!c.revoked
+                ? `<button class="btn btn--danger btn--sm" onclick="revokeCode('${c.id}')">Revoke</button>`
+                : '<span class="badge badge--error">Revoked</span>'}
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        showAlert(document.getElementById('alert'), 'Failed to load codes: ' + err.message);
+      }
+    }
+
+    async function revokeCode(codeId) {
+      if (!confirm('Revoke this code? The participant will lose access immediately.')) return;
+      try {
+        await API.del(`/api/events/${eventId}/codes/${codeId}`);
+        loadCodes();
+      } catch (err) {
+        showAlert(document.getElementById('alert'), 'Revoke failed: ' + err.message);
+      }
+    }
+
+    function openCodeModal() {
+      document.getElementById('code-success').style.display = 'none';
+      document.getElementById('code-form').style.display = 'block';
+      document.getElementById('code-form').reset();
+      hideAlert(document.getElementById('code-alert'));
+      document.getElementById('code-modal').classList.add('active');
+    }
+
+    function closeCodeModal() {
+      document.getElementById('code-modal').classList.remove('active');
+      loadCodes();
+    }
+
+    document.getElementById('code-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('code-btn');
+      btn.disabled = true; btn.textContent = 'Generating…';
+      hideAlert(document.getElementById('code-alert'));
+      try {
+        const code = await API.post(`/api/events/${eventId}/codes`, {
+          label:      document.getElementById('code-label').value.trim() || null,
+          permission: document.getElementById('code-perm').value,
+        });
+        document.getElementById('new-share-url').textContent = code.share_url;
+        document.getElementById('new-code-val').textContent = code.code;
+        document.getElementById('code-form').style.display = 'none';
+        document.getElementById('code-success').style.display = 'block';
+      } catch (err) {
+        showAlert(document.getElementById('code-alert'), err.message);
+        btn.disabled = false; btn.textContent = 'Generate Code';
+      }
+    });
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    loadEvent();
+    loadCodes();
+  </script>
+</body>
+</html>
