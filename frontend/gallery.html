@@ -165,11 +165,30 @@
 
       let done = 0;
       for (const file of files) {
-        const fd = new FormData();
-        fd.append('file', file);
         try {
-          const res = await ParticipantAPI.upload(`/e/${eventCode}/photos`, fd);
-          photos.unshift({ id: res.id, url: res.url, download_url: res.download_url, original_name: file.name, content_type: file.type, uploaded_at: new Date().toISOString() });
+          // 1. Get presigned upload URL
+          const urlRes = await ParticipantAPI.post(`/e/${eventCode}/photos/upload-url`, {
+            filename: file.name,
+            content_type: file.type
+          });
+
+          // 2. Upload directly to S3
+          const fd = new FormData();
+          Object.keys(urlRes.fields).forEach(k => fd.append(k, urlRes.fields[k]));
+          fd.append('file', file);
+
+          const s3Res = await fetch(urlRes.url, { method: 'POST', body: fd });
+          if (!s3Res.ok) throw new Error("S3 Upload failed");
+
+          // 3. Confirm upload with API
+          const confirmRes = await ParticipantAPI.post(`/e/${eventCode}/photos/confirm`, {
+            photo_id: urlRes.photo_id,
+            s3_key: urlRes.s3_key,
+            original_name: file.name,
+            content_type: file.type
+          });
+
+          photos.unshift({ ...confirmRes, uploaded_at: new Date().toISOString() });
           done++;
           fill.style.width = `${Math.round((done / files.length) * 100)}%`;
         } catch (err) {

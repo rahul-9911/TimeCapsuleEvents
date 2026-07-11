@@ -20,8 +20,10 @@ const API = {
     }
     const res = await fetch(path, opts);
     if (res.status === 401) {
-      window.location.href = '/login.html';
-      return;
+      if (window.location.pathname !== '/login.html' && window.location.pathname !== '/') {
+        window.location.href = '/login.html';
+      }
+      throw new Error("Unauthorized");
     }
     if (!res.ok) {
       const text = await res.text();

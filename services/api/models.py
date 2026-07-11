@@ -69,6 +69,18 @@ class PhotoOut(BaseModel):
     uploaded_by_label: Optional[str] = None
 
 
+class UploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str
+
+
+class UploadConfirmRequest(BaseModel):
+    photo_id: str
+    s3_key: str
+    original_name: str
+    content_type: str
+
+
 # ── Activity ──────────────────────────────────────────────────────────────────
 
 class ActivitySummary(BaseModel):

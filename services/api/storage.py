@@ -21,6 +21,7 @@ def _get_s3():
         _s3 = boto3.client(
             "s3",
             region_name=REGION,
+            endpoint_url=f"https://s3.{REGION}.amazonaws.com",
             config=Config(signature_version="s3v4"),
         )
     return _s3
@@ -74,6 +75,38 @@ def get_presigned_url(
         Params=params,
         ExpiresIn=expires,
     )
+
+
+def generate_presigned_post(
+    event_code: str,
+    filename: str,
+    content_type: str,
+    max_size_mb: int = 50,
+) -> tuple[str, str, dict]:
+    """
+    Generate a presigned POST URL for direct browser uploads.
+    Returns (photo_id, s3_key, presigned_post_data_dict)
+    """
+    photo_id = str(uuid.uuid4())
+    s3_key = _photo_key(event_code, photo_id, filename)
+
+    s3 = _get_s3()
+    
+    conditions = [
+        ["starts-with", "$Content-Type", ""],
+        ["content-length-range", 0, max_size_mb * 1024 * 1024],
+    ]
+
+    # Boto3 generates a dictionary with 'url' and 'fields'
+    presigned_data = s3.generate_presigned_post(
+        Bucket=BUCKET,
+        Key=s3_key,
+        Fields={"Content-Type": content_type},
+        Conditions=conditions,
+        ExpiresIn=3600,
+    )
+
+    return photo_id, s3_key, presigned_data
 
 
 async def delete_event_photos(event_code: str) -> None:

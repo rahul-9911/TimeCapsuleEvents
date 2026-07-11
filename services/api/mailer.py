@@ -25,7 +25,7 @@ def _get_ses():
 
 def send_magic_link(to_email: str, magic_link: str) -> None:
     """Send a magic login link — console fallback if SES not configured."""
-    if ENV == "dev" or not SES_SENDER:
+    if not SES_SENDER:
         _console_fallback(to_email, magic_link)
         return
     _send_via_ses(to_email, magic_link)

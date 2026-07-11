@@ -9,7 +9,7 @@ DELETE /e/{code}/photos/{id}    → delete photo
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, HTTPException, Request
 
 from db import (
     validate_participant_code,
@@ -21,8 +21,8 @@ from db import (
     log_activity,
     get_access_code,
 )
-from storage import save_photo, delete_photo, get_presigned_url
-from models import PhotoOut
+from storage import generate_presigned_post, delete_photo, get_presigned_url
+from models import PhotoOut, UploadUrlRequest, UploadConfirmRequest
 
 router = APIRouter(tags=["participant"])
 
@@ -116,45 +116,68 @@ async def list_photos_endpoint(code: str, request: Request):
     return result
 
 
-@router.post("/e/{code}/photos", status_code=201)
-async def upload_photo_endpoint(
+@router.post("/e/{code}/photos/upload-url")
+async def get_upload_url_endpoint(
     code: str,
     request: Request,
-    file: UploadFile = File(...),
+    body: UploadUrlRequest,
 ):
     ac = await _resolve_participant(request)
     allowed = PERMISSIONS.get(ac["permission"], set())
     if "upload" not in allowed:
         raise HTTPException(403, "Your access code does not permit uploading")
 
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(415, f"Unsupported file type: {file.content_type}")
-
-    data = await file.read()
-    if len(data) > MAX_FILE_SIZE_MB * 1024 * 1024:
-        raise HTTPException(413, f"File too large. Max {MAX_FILE_SIZE_MB}MB.")
+    if body.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(415, f"Unsupported file type: {body.content_type}")
 
     event_code = ac["event_code"]
-    photo_id, s3_key = await save_photo(
-        event_code, data, file.filename or "photo.jpg", file.content_type
+    photo_id, s3_key, presigned_data = generate_presigned_post(
+        event_code=event_code,
+        filename=body.filename or "photo.jpg",
+        content_type=body.content_type,
+        max_size_mb=MAX_FILE_SIZE_MB,
     )
+
+    return {
+        "photo_id": photo_id,
+        "s3_key": s3_key,
+        "url": presigned_data["url"],
+        "fields": presigned_data["fields"],
+    }
+
+
+@router.post("/e/{code}/photos/confirm", status_code=201)
+async def confirm_upload_endpoint(
+    code: str,
+    request: Request,
+    body: UploadConfirmRequest,
+):
+    ac = await _resolve_participant(request)
+    allowed = PERMISSIONS.get(ac["permission"], set())
+    if "upload" not in allowed:
+        raise HTTPException(403, "Your access code does not permit uploading")
+
+    event_code = ac["event_code"]
 
     await create_photo_record(
         event_code=event_code,
-        photo_id=photo_id,
-        s3_key=s3_key,
-        original_name=file.filename or "photo.jpg",
-        content_type=file.content_type,
+        photo_id=body.photo_id,
+        s3_key=body.s3_key,
+        original_name=body.original_name or "photo.jpg",
+        content_type=body.content_type,
         access_code=ac["code"],
     )
 
     ip = request.client.host if request.client else None
-    await log_activity(event_code, ac["code"], "UPLOAD", photo_id=photo_id, ip_address=ip)
+    await log_activity(event_code, ac["code"], "UPLOAD", photo_id=body.photo_id, ip_address=ip)
 
     return {
-        "id": photo_id,
-        "url": get_presigned_url(s3_key),
-        "download_url": get_presigned_url(s3_key, download_filename=file.filename),
+        "id": body.photo_id,
+        "url": get_presigned_url(body.s3_key),
+        "download_url": get_presigned_url(body.s3_key, download_filename=body.original_name),
+        "original_name": body.original_name,
+        "content_type": body.content_type,
+        "uploaded_at": None, # Will be set by client or DB read
     }
 
 
