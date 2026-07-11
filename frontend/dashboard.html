@@ -68,26 +68,9 @@
       try {
         events = await API.get('/api/events');
         render();
-        pollStatus();
       } catch (err) {
         showAlert(document.getElementById('alert'), 'Failed to load events: ' + err.message);
       }
-    }
-
-    function pollStatus() {
-      if (window.statusInterval) return;
-      window.statusInterval = setInterval(async () => {
-        const hasStarting = events.some(e => e.status === 'STARTING');
-        if (!hasStarting) {
-          clearInterval(window.statusInterval);
-          window.statusInterval = null;
-          return;
-        }
-        try {
-          events = await API.get('/api/events');
-          render();
-        } catch(e) {}
-      }, 3000);
     }
 
     function render() {
@@ -108,29 +91,27 @@
           <p class="card__meta">${ev.event_date ? 'Date: ' + ev.event_date : 'No date set'}</p>
           ${ev.description ? `<p class="text-muted mt-sm" style="font-size:0.82rem;">${escHtml(ev.description)}</p>` : ''}
           <p class="text-muted mt-sm" style="font-size:0.78rem;">Created ${formatDate(ev.created_at)}</p>
+          ${ev.expires_at ? `<p class="text-muted" style="font-size:0.75rem;">Expires ${formatDate(ev.expires_at)}</p>` : ''}
+          <p class="text-muted" style="font-size:0.78rem;">📷 ${ev.photo_count || 0} photos · 🔑 ${ev.code_count || 0} codes</p>
           <div class="flex mt-md" style="gap:8px;">
-            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation();goEvent('${ev.id}')" ${ev.status !== 'RUNNING' ? 'disabled' : ''}>${ev.status === 'RUNNING' ? 'Manage →' : 'Starting…'}</button>
-            <button class="btn btn--danger btn--sm" onclick="event.stopPropagation();deleteEvent('${ev.id}', '${escHtml(ev.event_name)}')">Delete</button>
+            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation();goEvent('${ev.event_code}')">Manage →</button>
+            <button class="btn btn--danger btn--sm" onclick="event.stopPropagation();deleteEvent('${ev.event_code}', '${escHtml(ev.event_name)}')">Delete</button>
           </div>
         `;
-        if (ev.status === 'RUNNING') {
-          card.addEventListener('click', () => goEvent(ev.id));
-        } else {
-          card.style.cursor = 'wait';
-        }
+        card.addEventListener('click', () => goEvent(ev.event_code));
         grid.appendChild(card);
       });
     }
 
-    function goEvent(id) {
-      window.location.href = `/event-manage.html?id=${id}`;
+    function goEvent(code) {
+      window.location.href = `/event-manage.html?code=${code}`;
     }
 
-    async function deleteEvent(id, name) {
-      if (!confirm(`Delete event "${name}"? This stops the container and cannot be undone.`)) return;
+    async function deleteEvent(code, name) {
+      if (!confirm(`Delete event "${name}"? This will delete all photos and cannot be undone.`)) return;
       try {
-        await API.del(`/api/events/${id}`);
-        events = events.filter(e => e.id !== id);
+        await API.del(`/api/events/${code}`);
+        events = events.filter(e => e.event_code !== code);
         render();
       } catch (err) {
         showAlert(document.getElementById('alert'), 'Delete failed: ' + err.message);
@@ -156,7 +137,6 @@
         closeCreateModal();
         document.getElementById('create-form').reset();
         btn.disabled = false; btn.textContent = 'Create Event';
-        pollStatus(); // Start polling for this new event
       } catch (err) {
         showAlert(document.getElementById('create-alert'), err.message);
         btn.disabled = false; btn.textContent = 'Create Event';

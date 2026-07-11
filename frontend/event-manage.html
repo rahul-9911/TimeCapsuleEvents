@@ -109,22 +109,22 @@
 
   <script src="/static/js/api.js"></script>
   <script>
-    const params  = new URLSearchParams(location.search);
-    const eventId = params.get('id');
-    if (!eventId) window.location.href = '/dashboard.html';
-
-    let eventCode = '';
+    const params    = new URLSearchParams(location.search);
+    const eventCode = params.get('code');
+    if (!eventCode) window.location.href = '/dashboard.html';
 
     async function loadEvent() {
       try {
-        const ev = await API.get(`/api/events/${eventId}`);
+        const ev = await API.get(`/api/events/${eventCode}`);
         document.title = `SnapEvent — ${ev.event_name}`;
         document.getElementById('ev-name').textContent = ev.event_name;
         document.getElementById('ev-status').innerHTML = statusBadge(ev.status);
-        const meta = [ev.event_date ? 'Date: ' + ev.event_date : null, 'Code: ' + ev.event_code]
-          .filter(Boolean).join(' · ');
+        const meta = [
+          ev.event_date ? 'Date: ' + ev.event_date : null,
+          'Code: ' + ev.event_code,
+          ev.expires_at ? 'Expires: ' + formatDate(ev.expires_at) : null,
+        ].filter(Boolean).join(' · ');
         document.getElementById('ev-meta').textContent = meta;
-        eventCode = ev.event_code;
         document.getElementById('share-url').textContent = `${location.origin}/join.html`;
       } catch (err) {
         showAlert(document.getElementById('alert'), 'Failed to load event: ' + err.message);
@@ -133,7 +133,7 @@
 
     async function loadCodes() {
       try {
-        const codes = await API.get(`/api/events/${eventId}/codes`);
+        const codes = await API.get(`/api/events/${eventCode}/codes`);
         const tbody = document.getElementById('codes-body');
         if (!codes.length) {
           tbody.innerHTML = `<tr><td colspan="9" class="text-muted" style="text-align:center;padding:24px;">No codes yet — create one above</td></tr>`;
@@ -166,7 +166,7 @@
     async function revokeCode(codeId) {
       if (!confirm('Revoke this code? The participant will lose access immediately.')) return;
       try {
-        await API.del(`/api/events/${eventId}/codes/${codeId}`);
+        await API.del(`/api/events/${eventCode}/codes/${codeId}`);
         loadCodes();
       } catch (err) {
         showAlert(document.getElementById('alert'), 'Revoke failed: ' + err.message);
@@ -192,7 +192,7 @@
       btn.disabled = true; btn.textContent = 'Generating…';
       hideAlert(document.getElementById('code-alert'));
       try {
-        const code = await API.post(`/api/events/${eventId}/codes`, {
+        const code = await API.post(`/api/events/${eventCode}/codes`, {
           label:      document.getElementById('code-label').value.trim() || null,
           permission: document.getElementById('code-perm').value,
         });

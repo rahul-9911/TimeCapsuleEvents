@@ -1,41 +1,46 @@
-.PHONY: dev dev-down build push deploy destroy logs shell
+.PHONY: build push deploy destroy plan
 
 # ── Config ───────────────────────────────────────────────────────────────────
 TAG     ?= latest
 ENV     ?= dev
-ECR_URL ?= $(shell aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text 2>/dev/null | sed 's|/snapevent-.*||')
+REGION  ?= ap-south-1
+ECR_URL  = $(shell cd terraform/environments/$(ENV) && terraform output -raw ecr_repository 2>/dev/null)
 
-# ── Local Dev ─────────────────────────────────────────────────────────────────
-dev:
-	@[ -f .env ] || (cp .env.example .env && echo "📋 Created .env from .env.example — edit it before continuing")
-	docker compose up --build
-
-dev-down:
-	docker compose down -v
-
-logs:
-	docker compose logs -f control
-
-shell:
-	docker compose exec control bash
-
-# ── Build Images ──────────────────────────────────────────────────────────────
+# ── Build Lambda Container Image ─────────────────────────────────────────────
 build:
-	docker build -t snapevent-control:$(TAG) -f docker/control/Dockerfile .
-	docker build -t snapevent-event:$(TAG)   -f docker/event/Dockerfile   .
+	docker build --platform linux/amd64 --provenance=false -t snapevent:$(TAG) -f Dockerfile .
 
 # ── Push to ECR ───────────────────────────────────────────────────────────────
 push: build
-	aws ecr get-login-password --region us-east-1 | \
+	aws ecr get-login-password --region $(REGION) | \
 		docker login --username AWS --password-stdin $(ECR_URL)
-	docker tag snapevent-control:$(TAG) $(ECR_URL)/snapevent-control:$(TAG)
-	docker tag snapevent-event:$(TAG)   $(ECR_URL)/snapevent-event:$(TAG)
-	docker push $(ECR_URL)/snapevent-control:$(TAG)
-	docker push $(ECR_URL)/snapevent-event:$(TAG)
-	@echo "✅ Pushed snapevent-control:$(TAG) and snapevent-event:$(TAG)"
+	docker tag snapevent:$(TAG) $(ECR_URL):$(TAG)
+	docker push $(ECR_URL):$(TAG)
+	@echo "✅ Pushed $(ECR_URL):$(TAG)"
 
-# ── Terraform: Deploy ─────────────────────────────────────────────────────────
-deploy: push
+# ── Update Lambda function with new image ─────────────────────────────────────
+update-lambda: push
+	aws lambda update-function-code \
+		--function-name snapevent-$(ENV)-api \
+		--image-uri $(ECR_URL):$(TAG) \
+		--region $(REGION)
+	aws lambda update-function-code \
+		--function-name snapevent-$(ENV)-cleanup \
+		--image-uri $(ECR_URL):$(TAG) \
+		--region $(REGION)
+	@echo "✅ Updated Lambda functions with $(TAG)"
+
+# ── Terraform: Init ──────────────────────────────────────────────────────────
+init:
+	cd terraform/environments/$(ENV) && terraform init
+
+# ── Terraform: Plan ──────────────────────────────────────────────────────────
+plan:
+	cd terraform/environments/$(ENV) && \
+		terraform plan -var="image_tag=$(TAG)"
+
+# ── Terraform: Deploy ────────────────────────────────────────────────────────
+deploy:
 	cd terraform/environments/$(ENV) && \
 		terraform init && \
 		terraform apply -var="image_tag=$(TAG)" -auto-approve
@@ -48,8 +53,6 @@ destroy:
 		terraform init && \
 		terraform destroy -var="image_tag=$(TAG)" -auto-approve
 
-# ── Terraform: Plan only ──────────────────────────────────────────────────────
-plan:
-	cd terraform/environments/$(ENV) && \
-		terraform init && \
-		terraform plan -var="image_tag=$(TAG)"
+# ── Show outputs ──────────────────────────────────────────────────────────────
+outputs:
+	cd terraform/environments/$(ENV) && terraform output
