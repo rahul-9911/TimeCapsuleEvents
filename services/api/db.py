@@ -159,20 +159,15 @@ async def create_event(
     event_name: str,
     description: Optional[str] = None,
     event_date: Optional[str] = None,
+    retention_days: int = 2,
 ) -> dict:
-    """Create an event. Sets expires_at to event_date + 24h or now + 24h."""
+    """Create an event. Sets expires_at to creation time + retention_days (1 to 14 days)."""
     table = _get_table()
     now = datetime.now(timezone.utc)
 
-    # Calculate expiry: event_date + 24h, or now + 24h if no date
-    if event_date:
-        try:
-            event_dt = datetime.fromisoformat(event_date).replace(tzinfo=timezone.utc)
-        except (ValueError, TypeError):
-            event_dt = now
-    else:
-        event_dt = now
-    expires_at = event_dt + timedelta(hours=24)
+    # Retention days clamped between 1 and 14 days (default 2 days)
+    days = max(1, min(retention_days if retention_days is not None else 2, 14))
+    expires_at = now + timedelta(days=days)
 
     event_item = {
         "PK": f"EVENT#{event_code}",
@@ -181,6 +176,7 @@ async def create_event(
         "event_name": event_name,
         "description": description or "",
         "event_date": event_date or "",
+        "retention_days": days,
         "organiser_email": email,
         "status": "ACTIVE",
         "created_at": now.isoformat(),
@@ -281,6 +277,7 @@ async def create_access_code(
     code: str,
     label: Optional[str],
     permission: str,
+    allow_bulk_download: bool = True,
 ) -> dict:
     table = _get_table()
     code_id = _new_id()
@@ -291,6 +288,7 @@ async def create_access_code(
         "code": code,
         "label": label or "",
         "permission": permission,
+        "allow_bulk_download": allow_bulk_download if allow_bulk_download is not None else True,
         "created_at": _now_iso(),
         "revoked": False,
     }

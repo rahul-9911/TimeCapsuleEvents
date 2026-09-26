@@ -22,6 +22,7 @@ class EventCreate(BaseModel):
     event_name: str
     description: Optional[str] = None
     event_date: Optional[date] = None
+    retention_days: Optional[int] = 2
 
 
 class EventOut(BaseModel):
@@ -29,6 +30,7 @@ class EventOut(BaseModel):
     event_name: str
     description: Optional[str] = None
     event_date: Optional[str] = None
+    retention_days: Optional[int] = 2
     status: str
     created_at: str
     expires_at: Optional[str] = None
@@ -41,6 +43,7 @@ class EventOut(BaseModel):
 class CodeCreate(BaseModel):
     label: Optional[str] = None
     permission: str  # VIEW_ONLY | VIEW_UPLOAD | VIEW_UPLOAD_DELETE
+    allow_bulk_download: bool = True
 
 
 class CodeOut(BaseModel):
@@ -48,6 +51,7 @@ class CodeOut(BaseModel):
     code: str
     label: Optional[str] = None
     permission: str
+    allow_bulk_download: bool = True
     share_url: str = ""
     created_at: str
     revoked: bool = False
@@ -65,8 +69,12 @@ class PhotoOut(BaseModel):
     download_url: str
     original_name: Optional[str] = None
     content_type: str = "image/jpeg"
-    uploaded_at: str
+    uploaded_at: Optional[str] = None
     uploaded_by_label: Optional[str] = None
+
+
+class BatchDeleteRequest(BaseModel):
+    photo_ids: list[str]
 
 
 class UploadUrlRequest(BaseModel):

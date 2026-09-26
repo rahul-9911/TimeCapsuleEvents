@@ -62,6 +62,7 @@ async def create_event_endpoint(
         event_name=body.event_name,
         description=body.description,
         event_date=event_date_str,
+        retention_days=body.retention_days or 2,
     )
 
     return EventOut(
@@ -69,6 +70,7 @@ async def create_event_endpoint(
         event_name=event["event_name"],
         description=event.get("description"),
         event_date=event.get("event_date"),
+        retention_days=event.get("retention_days", 2),
         status=event["status"],
         created_at=event["created_at"],
         expires_at=event.get("expires_at"),
@@ -87,6 +89,7 @@ async def list_events_endpoint(organiser: dict = Depends(get_current_organiser))
             event_name=e["event_name"],
             description=e.get("description"),
             event_date=e.get("event_date"),
+            retention_days=e.get("retention_days", 2),
             status=e["status"],
             created_at=e["created_at"],
             expires_at=e.get("expires_at"),
@@ -113,6 +116,7 @@ async def get_event_endpoint(
         event_name=event["event_name"],
         description=event.get("description"),
         event_date=event.get("event_date"),
+        retention_days=event.get("retention_days", 2),
         status=event["status"],
         created_at=event["created_at"],
         expires_at=event.get("expires_at"),

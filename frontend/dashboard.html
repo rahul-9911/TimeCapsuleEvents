@@ -49,8 +49,24 @@
           <input id="ev-desc" type="text" placeholder="Optional notes">
         </div>
         <div class="form-group">
-          <label for="ev-date">Event Date</label>
+          <label for="ev-date">Event Date (Informational)</label>
           <input id="ev-date" type="date">
+          <small class="text-muted" style="display:block;margin-top:4px;font-size:0.75rem;">Date when the event takes place (for reference only).</small>
+        </div>
+        <div class="form-group">
+          <label for="ev-retention">Auto-Delete Event &amp; Photos After *</label>
+          <select id="ev-retention" style="width:100%;padding:10px;border-radius:6px;background:#1a1a1a;color:#fff;border:1px solid #333;">
+            <option value="1">1 Day</option>
+            <option value="2" selected>2 Days (Default)</option>
+            <option value="3">3 Days</option>
+            <option value="4">4 Days</option>
+            <option value="5">5 Days</option>
+            <option value="6">6 Days</option>
+            <option value="7">7 Days (1 Week)</option>
+            <option value="10">10 Days</option>
+            <option value="14">14 Days (2 Weeks - Max)</option>
+          </select>
+          <small class="text-muted" style="display:block;margin-top:6px;font-size:0.75rem;color:#f87171;">⚠️ Warning: The event and all uploaded photos will be automatically &amp; permanently deleted after this duration (calculated from creation time).</small>
         </div>
         <div class="flex mt-md" style="gap:12px;">
           <button type="button" class="btn btn--ghost btn--full" onclick="closeCreateModal()">Cancel</button>
@@ -88,10 +104,10 @@
             <span class="card__title">${escHtml(ev.event_name)}</span>
             ${statusBadge(ev.status)}
           </div>
-          <p class="card__meta">${ev.event_date ? 'Date: ' + ev.event_date : 'No date set'}</p>
+          <p class="card__meta">${ev.event_date ? 'Event Date: ' + ev.event_date : 'No date set'}</p>
           ${ev.description ? `<p class="text-muted mt-sm" style="font-size:0.82rem;">${escHtml(ev.description)}</p>` : ''}
           <p class="text-muted mt-sm" style="font-size:0.78rem;">Created ${formatDate(ev.created_at)}</p>
-          ${ev.expires_at ? `<p class="text-muted" style="font-size:0.75rem;">Expires ${formatDate(ev.expires_at)}</p>` : ''}
+          ${ev.expires_at ? `<p class="text-muted" style="font-size:0.75rem;color:#f87171;">⚠️ Auto-deletes: ${formatDate(ev.expires_at)} (${ev.retention_days || 2} day retention)</p>` : ''}
           <p class="text-muted" style="font-size:0.78rem;">📷 ${ev.photo_count || 0} photos · 🔑 ${ev.code_count || 0} codes</p>
           <div class="flex mt-md" style="gap:8px;">
             <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation();goEvent('${ev.event_code}')">Manage →</button>
@@ -128,9 +144,10 @@
       hideAlert(document.getElementById('create-alert'));
       try {
         const ev = await API.post('/api/events', {
-          event_name:  document.getElementById('ev-name').value.trim(),
-          description: document.getElementById('ev-desc').value.trim() || null,
-          event_date:  document.getElementById('ev-date').value || null,
+          event_name:     document.getElementById('ev-name').value.trim(),
+          description:    document.getElementById('ev-desc').value.trim() || null,
+          event_date:     document.getElementById('ev-date').value || null,
+          retention_days: parseInt(document.getElementById('ev-retention').value, 10),
         });
         events.unshift(ev);
         render();

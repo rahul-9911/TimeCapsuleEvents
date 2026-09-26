@@ -51,6 +51,7 @@
             <th>Label</th>
             <th>Code</th>
             <th>Permission</th>
+            <th>Bulk DL</th>
             <th>Views</th>
             <th>Uploads</th>
             <th>Deletes</th>
@@ -60,7 +61,7 @@
           </tr>
         </thead>
         <tbody id="codes-body">
-          <tr><td colspan="9" class="text-muted" style="text-align:center;padding:24px;">No codes yet</td></tr>
+          <tr><td colspan="10" class="text-muted" style="text-align:center;padding:24px;">No codes yet</td></tr>
         </tbody>
       </table>
     </div>
@@ -99,6 +100,13 @@
             <option value="VIEW_UPLOAD_DELETE">Full Access — view, upload, delete</option>
           </select>
         </div>
+        <div class="form-group" style="margin-top:12px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;font-size:0.85rem;">
+            <input id="code-bulk-dl" type="checkbox" checked style="width:16px;height:16px;cursor:pointer;">
+            Allow Bulk Download (.ZIP)
+          </label>
+          <small class="text-muted" style="display:block;margin-top:4px;font-size:0.75rem;">If enabled, participants using this code can download multiple or all photos in a single .ZIP file.</small>
+        </div>
         <div class="flex mt-md" style="gap:12px;">
           <button type="button" class="btn btn--ghost btn--full" onclick="closeCodeModal()">Cancel</button>
           <button id="code-btn" type="submit" class="btn btn--primary btn--full">Generate Code</button>
@@ -120,9 +128,9 @@
         document.getElementById('ev-name').textContent = ev.event_name;
         document.getElementById('ev-status').innerHTML = statusBadge(ev.status);
         const meta = [
-          ev.event_date ? 'Date: ' + ev.event_date : null,
+          ev.event_date ? 'Event Date: ' + ev.event_date : null,
           'Code: ' + ev.event_code,
-          ev.expires_at ? 'Expires: ' + formatDate(ev.expires_at) : null,
+          ev.expires_at ? 'Auto-deletes on: ' + formatDate(ev.expires_at) : null,
         ].filter(Boolean).join(' · ');
         document.getElementById('ev-meta').textContent = meta;
         document.getElementById('share-url').textContent = `${location.origin}/join.html`;
@@ -136,7 +144,7 @@
         const codes = await API.get(`/api/events/${eventCode}/codes`);
         const tbody = document.getElementById('codes-body');
         if (!codes.length) {
-          tbody.innerHTML = `<tr><td colspan="9" class="text-muted" style="text-align:center;padding:24px;">No codes yet — create one above</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="10" class="text-muted" style="text-align:center;padding:24px;">No codes yet — create one above</td></tr>`;
           return;
         }
         tbody.innerHTML = codes.map(c => `
@@ -144,6 +152,7 @@
             <td>${c.label ? escHtml(c.label) : '<span class="text-muted">—</span>'}</td>
             <td><code style="font-size:0.85rem;">${c.code}</code></td>
             <td>${permissionBadge(c.permission)}</td>
+            <td>${c.allow_bulk_download !== false ? '<span style="color:#4ade80;font-size:0.8rem;">Allowed</span>' : '<span class="text-muted" style="font-size:0.8rem;">Off</span>'}</td>
             <td>${c.views}</td>
             <td>${c.uploads}</td>
             <td>${c.deletes}</td>
@@ -177,6 +186,7 @@
       document.getElementById('code-success').style.display = 'none';
       document.getElementById('code-form').style.display = 'block';
       document.getElementById('code-form').reset();
+      document.getElementById('code-bulk-dl').checked = true;
       hideAlert(document.getElementById('code-alert'));
       document.getElementById('code-modal').classList.add('active');
     }
@@ -193,8 +203,9 @@
       hideAlert(document.getElementById('code-alert'));
       try {
         const code = await API.post(`/api/events/${eventCode}/codes`, {
-          label:      document.getElementById('code-label').value.trim() || null,
-          permission: document.getElementById('code-perm').value,
+          label:               document.getElementById('code-label').value.trim() || null,
+          permission:          document.getElementById('code-perm').value,
+          allow_bulk_download: document.getElementById('code-bulk-dl').checked,
         });
         document.getElementById('new-share-url').textContent = code.share_url;
         document.getElementById('new-code-val').textContent = code.code;

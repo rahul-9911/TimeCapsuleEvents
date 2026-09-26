@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SnapEvent — Gallery</title>
   <link rel="stylesheet" href="/static/css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <style>
     .toolbar {
       display: flex;
@@ -17,6 +19,32 @@
     .toolbar__title { font-weight: 600; font-size: 1rem; }
     .toolbar__code  { font-size: 0.75rem; color: var(--text-muted); font-family: monospace; }
     .toolbar__spacer{ flex: 1; }
+    .selection-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 24px;
+      background: #18181b;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .photo-checkbox {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 22px;
+      height: 22px;
+      cursor: pointer;
+      z-index: 10;
+      accent-color: #6366f1;
+    }
+    .gallery__item {
+      position: relative;
+    }
+    .gallery__item.selected {
+      outline: 3px solid #6366f1;
+      border-radius: 8px;
+    }
   </style>
 </head>
 <body>
@@ -38,6 +66,19 @@
   <!-- Progress bar for upload -->
   <div id="upload-progress" class="progress-bar" style="margin:0;border-radius:0;">
     <div id="upload-fill" class="progress-bar__fill"></div>
+  </div>
+
+  <!-- Selection Bar -->
+  <div id="selection-bar" class="selection-bar" style="display:none;">
+    <button class="btn btn--ghost btn--sm" onclick="toggleSelectAll()">Select All</button>
+    <span id="selected-count" style="font-size:0.85rem;color:var(--text-muted);">0 selected</span>
+    <div style="flex:1;"></div>
+    <button id="bulk-dl-btn" class="btn btn--primary btn--sm" style="display:none;" onclick="downloadSelectedZip()">
+      ⬇️ Download Selected (.ZIP)
+    </button>
+    <button id="bulk-del-btn" class="btn btn--danger btn--sm" style="display:none;" onclick="deleteSelectedPhotos()">
+      🗑️ Delete Selected
+    </button>
   </div>
 
   <div class="container container--wide" style="padding-top:24px;padding-bottom:40px;">
@@ -63,11 +104,13 @@
 
   <script src="/static/js/api.js"></script>
   <script>
-    let participantCode = sessionStorage.getItem('participant_code') || '';
-    let eventCode       = '';
-    let permission      = '';
-    let photos          = [];
-    let currentPhotoId  = null;
+    let participantCode   = sessionStorage.getItem('participant_code') || '';
+    let eventCode         = '';
+    let permission        = '';
+    let allowBulkDownload = true;
+    let photos            = [];
+    let selectedPhotoIds  = new Set();
+    let currentPhotoId    = null;
 
     if (!participantCode) {
       window.location.href = '/join.html';
@@ -77,11 +120,6 @@
 
     // ── Boot: discover event from participant code ─────────────────────────
     async function boot() {
-      // We need to know the event code to build the URL.
-      // Strategy: try a known path format. The control plane proxy routes
-      // /e/{event_code}/* → event container. But from the participant side
-      // we only have the access code. We call a discovery endpoint on the
-      // control plane.
       try {
         const info = await fetch('/api/participant/discover', {
           method: 'POST',
@@ -90,8 +128,9 @@
         });
         if (!info.ok) throw new Error('Invalid or expired access code');
         const data = await info.json();
-        eventCode  = data.event_code;
-        permission = data.permission;
+        eventCode         = data.event_code;
+        permission        = data.permission;
+        allowBulkDownload = data.allow_bulk_download !== false;
         setupUI();
         await loadPhotos();
       } catch (err) {
@@ -124,6 +163,7 @@
     async function loadPhotos() {
       try {
         photos = await ParticipantAPI.get(`/e/${eventCode}/photos`);
+        selectedPhotoIds.clear();
         renderGallery();
       } catch (err) {
         showAlert(document.getElementById('alert'), 'Failed to load photos: ' + err.message);
@@ -134,13 +174,20 @@
       const gallery = document.getElementById('gallery');
       const empty   = document.getElementById('empty');
       gallery.innerHTML = '';
-      if (!photos.length) { empty.style.display = 'block'; return; }
+      if (!photos.length) {
+        empty.style.display = 'block';
+        document.getElementById('selection-bar').style.display = 'none';
+        return;
+      }
       empty.style.display = 'none';
+      document.getElementById('selection-bar').style.display = 'flex';
 
       photos.forEach(photo => {
+        const isSelected = selectedPhotoIds.has(photo.id);
         const item = document.createElement('div');
-        item.className = 'gallery__item';
+        item.className = `gallery__item ${isSelected ? 'selected' : ''}`;
         item.innerHTML = `
+          <input type="checkbox" class="photo-checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleSelectPhoto('${photo.id}')">
           <img src="${photo.url}" alt="${escHtml(photo.original_name || 'Photo')}" loading="lazy">
           <div class="gallery__overlay">
             <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation();openLightbox('${photo.id}')">View</button>
@@ -152,6 +199,88 @@
         item.addEventListener('click', () => openLightbox(photo.id));
         gallery.appendChild(item);
       });
+
+      updateSelectionUI();
+    }
+
+    // ── Multi-select state ────────────────────────────────────────────────
+    function toggleSelectPhoto(photoId) {
+      if (selectedPhotoIds.has(photoId)) {
+        selectedPhotoIds.delete(photoId);
+      } else {
+        selectedPhotoIds.add(photoId);
+      }
+      renderGallery();
+    }
+
+    function toggleSelectAll() {
+      if (selectedPhotoIds.size === photos.length) {
+        selectedPhotoIds.clear();
+      } else {
+        photos.forEach(p => selectedPhotoIds.add(p.id));
+      }
+      renderGallery();
+    }
+
+    function updateSelectionUI() {
+      const countSpan = document.getElementById('selected-count');
+      const dlBtn     = document.getElementById('bulk-dl-btn');
+      const delBtn    = document.getElementById('bulk-del-btn');
+      const count     = selectedPhotoIds.size;
+
+      countSpan.textContent = `${count} of ${photos.length} selected`;
+
+      dlBtn.style.display  = (allowBulkDownload && count > 0) ? 'inline-block' : 'none';
+      delBtn.style.display = (permission === 'VIEW_UPLOAD_DELETE' && count > 0) ? 'inline-block' : 'none';
+    }
+
+    // ── Bulk Download (ZIP) ────────────────────────────────────────────────
+    async function downloadSelectedZip() {
+      if (!selectedPhotoIds.size) return;
+      const statusAlert = document.getElementById('upload-status');
+      const selected = photos.filter(p => selectedPhotoIds.has(p.id));
+      showAlert(statusAlert, `Preparing ZIP archive of ${selected.length} photo${selected.length > 1 ? 's' : ''}…`, 'info');
+
+      try {
+        const zip = new JSZip();
+        let fetched = 0;
+
+        for (const photo of selected) {
+          const res = await fetch(photo.download_url);
+          if (!res.ok) throw new Error(`Failed to download ${photo.original_name || 'photo'}`);
+          const blob = await res.blob();
+          const fileName = photo.original_name || `photo_${photo.id}.jpg`;
+          zip.file(fileName, blob);
+          fetched++;
+          showAlert(statusAlert, `Downloaded ${fetched} of ${selected.length} photos…`, 'info');
+        }
+
+        showAlert(statusAlert, `Compressing ZIP file…`, 'info');
+        const zipContent = await zip.generateAsync({ type: 'blob' });
+        saveAs(zipContent, `${eventCode}_photos.zip`);
+        showAlert(statusAlert, `ZIP download complete!`, 'info');
+        setTimeout(() => hideAlert(statusAlert), 4000);
+      } catch (err) {
+        showAlert(document.getElementById('alert'), `Bulk download failed: ${err.message}`);
+        hideAlert(statusAlert);
+      }
+    }
+
+    // ── Bulk Delete ────────────────────────────────────────────────────────
+    async function deleteSelectedPhotos() {
+      if (!selectedPhotoIds.size) return;
+      const count = selectedPhotoIds.size;
+      if (!confirm(`Delete ${count} selected photo${count > 1 ? 's' : ''}? This cannot be undone.`)) return;
+
+      try {
+        const ids = Array.from(selectedPhotoIds);
+        await ParticipantAPI.post(`/e/${eventCode}/photos/batch-delete`, { photo_ids: ids });
+        photos = photos.filter(p => !selectedPhotoIds.has(p.id));
+        selectedPhotoIds.clear();
+        renderGallery();
+      } catch (err) {
+        showAlert(document.getElementById('alert'), `Bulk delete failed: ${err.message}`);
+      }
     }
 
     // ── Upload ─────────────────────────────────────────────────────────────
@@ -166,13 +295,11 @@
       let done = 0;
       for (const file of files) {
         try {
-          // 1. Get presigned upload URL
           const urlRes = await ParticipantAPI.post(`/e/${eventCode}/photos/upload-url`, {
             filename: file.name,
             content_type: file.type
           });
 
-          // 2. Upload directly to S3
           const fd = new FormData();
           Object.keys(urlRes.fields).forEach(k => fd.append(k, urlRes.fields[k]));
           fd.append('file', file);
@@ -180,7 +307,6 @@
           const s3Res = await fetch(urlRes.url, { method: 'POST', body: fd });
           if (!s3Res.ok) throw new Error("S3 Upload failed");
 
-          // 3. Confirm upload with API
           const confirmRes = await ParticipantAPI.post(`/e/${eventCode}/photos/confirm`, {
             photo_id: urlRes.photo_id,
             s3_key: urlRes.s3_key,
@@ -202,12 +328,13 @@
       renderGallery();
     }
 
-    // ── Delete ─────────────────────────────────────────────────────────────
+    // ── Single Delete ──────────────────────────────────────────────────────
     async function deletePhoto(photoId) {
       if (!confirm('Delete this photo? This cannot be undone.')) return;
       try {
         await ParticipantAPI.del(`/e/${eventCode}/photos/${photoId}`);
         photos = photos.filter(p => p.id !== photoId);
+        selectedPhotoIds.delete(photoId);
         closeLightbox();
         renderGallery();
       } catch (err) {

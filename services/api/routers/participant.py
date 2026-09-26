@@ -22,10 +22,9 @@ from db import (
     get_access_code,
 )
 from storage import generate_presigned_post, delete_photo, get_presigned_url
-from models import PhotoOut, UploadUrlRequest, UploadConfirmRequest
+from models import PhotoOut, UploadUrlRequest, UploadConfirmRequest, BatchDeleteRequest
 
 router = APIRouter(tags=["participant"])
-
 PERMISSIONS = {
     "VIEW_ONLY": {"view"},
     "VIEW_UPLOAD": {"view", "upload"},
@@ -79,6 +78,7 @@ async def discover_event(request: Request):
     return {
         "event_code": ac["event_code"],
         "permission": ac["permission"],
+        "allow_bulk_download": ac.get("allow_bulk_download", True),
         "label": ac.get("label", ""),
         "event_name": event.get("event_name", ""),
     }
@@ -198,3 +198,21 @@ async def delete_photo_endpoint(code: str, photo_id: str, request: Request):
 
     ip = request.client.host if request.client else None
     await log_activity(event_code, ac["code"], "DELETE", photo_id=photo_id, ip_address=ip)
+
+
+@router.post("/e/{code}/photos/batch-delete", status_code=204)
+async def batch_delete_photos_endpoint(code: str, request: Request, body: BatchDeleteRequest):
+    ac = await _resolve_participant(request)
+    allowed = PERMISSIONS.get(ac["permission"], set())
+    if "delete" not in allowed:
+        raise HTTPException(403, "Your access code does not permit deleting photos")
+
+    event_code = ac["event_code"]
+    ip = request.client.host if request.client else None
+
+    for photo_id in body.photo_ids:
+        photo = await get_photo(event_code, photo_id)
+        if photo:
+            await delete_photo(photo["s3_key"])
+            await delete_photo_record(event_code, photo_id)
+            await log_activity(event_code, ac["code"], "DELETE", photo_id=photo_id, ip_address=ip)

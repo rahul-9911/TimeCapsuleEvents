@@ -60,7 +60,7 @@ data "aws_iam_policy_document" "lambda_permissions" {
   statement {
     sid       = "SES"
     actions   = ["ses:SendEmail", "ses:SendRawEmail"]
-    resources = [var.ses_sender_arn]
+    resources = ["*"]
   }
 
   # SSM Parameter Store (read-only)

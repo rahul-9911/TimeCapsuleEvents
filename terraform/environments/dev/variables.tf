@@ -10,7 +10,7 @@ variable "aws_region" {
 
 variable "image_tag" {
   type    = string
-  default = "latest"
+  default = "v6"
 }
 
 variable "ses_sender_email" {
