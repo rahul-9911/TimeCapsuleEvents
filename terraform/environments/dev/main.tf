@@ -61,6 +61,7 @@ module "lambda" {
   ses_sender_email    = module.ses.sender_email
   ses_sender_arn      = module.ses.sender_arn
   base_url            = module.api_gateway.api_url
+  worker_api_key      = var.worker_api_key
 }
 
 # ── API Gateway ───────────────────────────────────────────────────────────────

@@ -46,7 +46,14 @@ async def create_code_endpoint(
         raise HTTPException(400, "permission must be VIEW_ONLY, VIEW_UPLOAD, or VIEW_UPLOAD_DELETE")
 
     access_code_value = _new_access_code()
-    item = await create_access_code(code, access_code_value, body.label, body.permission, body.allow_bulk_download)
+    item = await create_access_code(
+        code,
+        access_code_value,
+        body.label,
+        body.permission,
+        body.allow_bulk_download,
+        body.allow_ai_trigger,
+    )
 
     return CodeOut(
         id=item["id"],
@@ -54,6 +61,7 @@ async def create_code_endpoint(
         label=item.get("label"),
         permission=item["permission"],
         allow_bulk_download=item.get("allow_bulk_download", True),
+        allow_ai_trigger=item.get("allow_ai_trigger", False),
         share_url=f"{BASE_URL}/join.html?code={item['code']}",
         created_at=item["created_at"],
         revoked=item.get("revoked", False),
@@ -83,6 +91,7 @@ async def list_codes_endpoint(
             label=item.get("label"),
             permission=item["permission"],
             allow_bulk_download=item.get("allow_bulk_download", True),
+            allow_ai_trigger=item.get("allow_ai_trigger", False),
             share_url=f"{BASE_URL}/join.html?code={item['code']}",
             created_at=item["created_at"],
             revoked=item.get("revoked", False),

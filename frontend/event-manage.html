@@ -39,6 +39,53 @@
       <p class="text-muted mt-sm" style="font-size:0.78rem;">Share this with guests — they'll be prompted to enter their individual code.</p>
     </div>
 
+    <!-- AI Editing Panel -->
+    <div id="ai-panel" class="card" style="margin-bottom:24px;display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div>
+          <p style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:4px;">AI PHOTO EDITING</p>
+          <p style="font-size:0.78rem;color:var(--text-muted);">Run photos through a local ComfyUI workflow. Processed photos appear in a new auto-created event.</p>
+        </div>
+        <label id="ai-toggle-wrap" class="ai-toggle" title="Enable AI editing (requires a code with AI trigger permission)" style="display:none;">
+          <input type="checkbox" id="ai-toggle" onchange="handleAIToggle(this.checked)">
+          <span class="ai-toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- Workflow selector (shown when enabling) -->
+      <div id="ai-workflow-row" style="display:none;margin-bottom:14px;">
+        <label for="ai-workflow-select" style="font-size:0.82rem;font-weight:500;display:block;margin-bottom:6px;">Workflow</label>
+        <select id="ai-workflow-select" style="width:100%;max-width:320px;">
+          <option value="seedvr2_upscale">SeedVR2 4x Upscale</option>
+        </select>
+      </div>
+
+      <!-- Status display -->
+      <div id="ai-status-area">
+        <div id="ai-status-idle" class="ai-status-box ai-status-idle" style="display:none;">
+          <span class="ai-status-dot" style="background:#4ade80;"></span>
+          <span>Watching for new photos…</span>
+        </div>
+        <div id="ai-status-queued" class="ai-status-box ai-status-queued" style="display:none;">
+          <span class="ai-status-dot ai-pulse" style="background:#facc15;"></span>
+          <span>Queued — waiting for worker to pick up…</span>
+        </div>
+        <div id="ai-status-processing" class="ai-status-box ai-status-processing" style="display:none;">
+          <span class="ai-status-dot ai-pulse" style="background:#60a5fa;"></span>
+          <span id="ai-progress-text">Processing photos…</span>
+        </div>
+        <div id="ai-status-done" class="ai-status-box" style="display:none;background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);border-radius:8px;padding:10px 14px;">
+          <span class="ai-status-dot" style="background:#4ade80;"></span>
+          <span id="ai-done-text">Completed</span>
+          <a id="ai-output-link" href="#" class="btn btn--ghost btn--sm" style="margin-left:auto;" target="_blank">View Edited Event →</a>
+        </div>
+        <div id="ai-status-failed" class="ai-status-box" style="display:none;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:8px;padding:10px 14px;">
+          <span class="ai-status-dot" style="background:#f87171;"></span>
+          <span id="ai-error-text">Failed</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Access Codes Table -->
     <div class="flex-between" style="margin-bottom:12px;">
       <h2 style="font-size:1rem;font-weight:600;">Access Codes</h2>
@@ -52,6 +99,7 @@
             <th>Code</th>
             <th>Permission</th>
             <th>Bulk DL</th>
+            <th>AI Trigger</th>
             <th>Views</th>
             <th>Uploads</th>
             <th>Deletes</th>
@@ -107,6 +155,13 @@
           </label>
           <small class="text-muted" style="display:block;margin-top:4px;font-size:0.75rem;">If enabled, participants using this code can download multiple or all photos in a single .ZIP file.</small>
         </div>
+        <div class="form-group" style="margin-top:12px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;font-size:0.85rem;">
+            <input id="code-ai-trigger" type="checkbox" style="width:16px;height:16px;cursor:pointer;">
+            Allow AI Editing Toggle
+          </label>
+          <small class="text-muted" style="display:block;margin-top:4px;font-size:0.75rem;">If enabled, this code can enable/disable the AI photo editing pipeline for this event. Intended for organiser or trusted admin codes only.</small>
+        </div>
         <div class="flex mt-md" style="gap:12px;">
           <button type="button" class="btn btn--ghost btn--full" onclick="closeCodeModal()">Cancel</button>
           <button id="code-btn" type="submit" class="btn btn--primary btn--full">Generate Code</button>
@@ -116,14 +171,46 @@
   </div>
 
   <script src="/static/js/api.js"></script>
+  <style>
+    /* AI Toggle switch */
+    .ai-toggle { position:relative; display:inline-block; width:52px; height:28px; flex-shrink:0; }
+    .ai-toggle input { opacity:0; width:0; height:0; }
+    .ai-toggle-slider {
+      position:absolute; cursor:pointer; inset:0;
+      background:var(--border-color,#333); border-radius:28px;
+      transition:background 0.2s;
+    }
+    .ai-toggle-slider:before {
+      content:''; position:absolute;
+      width:20px; height:20px; border-radius:50%;
+      left:4px; bottom:4px; background:#fff;
+      transition:transform 0.2s;
+    }
+    .ai-toggle input:checked + .ai-toggle-slider { background:#6366f1; }
+    .ai-toggle input:checked + .ai-toggle-slider:before { transform:translateX(24px); }
+    /* AI status boxes */
+    .ai-status-box {
+      display:flex; align-items:center; gap:10px;
+      font-size:0.82rem; padding:10px 14px;
+      border-radius:8px; border:1px solid rgba(255,255,255,0.08);
+      background:rgba(255,255,255,0.03);
+    }
+    .ai-status-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .ai-pulse { animation: aipulse 1.5s ease-in-out infinite; }
+    @keyframes aipulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+  </style>
   <script>
     const params    = new URLSearchParams(location.search);
     const eventCode = params.get('code');
     if (!eventCode) window.location.href = '/dashboard.html';
 
+    let currentEvent = null;
+    let aiStatusInterval = null;
+
     async function loadEvent() {
       try {
         const ev = await API.get(`/api/events/${eventCode}`);
+        currentEvent = ev;
         document.title = `SnapEvent — ${ev.event_name}`;
         document.getElementById('ev-name').textContent = ev.event_name;
         document.getElementById('ev-status').innerHTML = statusBadge(ev.status);
@@ -134,8 +221,117 @@
         ].filter(Boolean).join(' · ');
         document.getElementById('ev-meta').textContent = meta;
         document.getElementById('share-url').textContent = `${location.origin}/join.html`;
+
+        // Render AI panel
+        renderAIPanel(ev);
       } catch (err) {
         showAlert(document.getElementById('alert'), 'Failed to load event: ' + err.message);
+      }
+    }
+
+    function renderAIPanel(ev) {
+      const panel = document.getElementById('ai-panel');
+      panel.style.display = 'block';
+
+      const toggleWrap = document.getElementById('ai-toggle-wrap');
+      const toggle = document.getElementById('ai-toggle');
+
+      // Show toggle only if organiser (they always can toggle since this is the organiser page)
+      toggleWrap.style.display = 'flex';
+      toggle.checked = ev.ai_editing_enabled || false;
+
+      // Show workflow selector when not enabled (choosing)
+      document.getElementById('ai-workflow-row').style.display =
+        ev.ai_editing_enabled ? 'none' : 'block';
+
+      updateAIStatusUI(ev);
+
+      // Auto-refresh status when active
+      clearInterval(aiStatusInterval);
+      const activeStatuses = ['QUEUED', 'PROCESSING'];
+      if (ev.ai_editing_enabled && ev.ai_job_status && activeStatuses.includes(ev.ai_job_status)) {
+        aiStatusInterval = setInterval(refreshAIStatus, 15000);
+      }
+    }
+
+    function updateAIStatusUI(ev) {
+      // Hide all status boxes
+      ['queued','processing','idle','done','failed'].forEach(s =>
+        document.getElementById(`ai-status-${s}`).style.display = 'none'
+      );
+
+      if (!ev.ai_editing_enabled && !ev.ai_job_status) return;
+
+      const status = ev.ai_job_status;
+      if (status === 'QUEUED') {
+        document.getElementById('ai-status-queued').style.display = 'flex';
+      } else if (status === 'PROCESSING') {
+        const p = ev.ai_job_progress || {};
+        const processed = p.processed || 0;
+        const total = p.total || '?';
+        document.getElementById('ai-progress-text').textContent =
+          `Processing… ${processed} of ${total} photos done`;
+        document.getElementById('ai-status-processing').style.display = 'flex';
+      } else if (status === 'IDLE') {
+        document.getElementById('ai-status-idle').style.display = 'flex';
+      } else if (status === 'COMPLETED') {
+        const outCode = ev.ai_output_event_code;
+        document.getElementById('ai-done-text').textContent =
+          `Completed — ${ev.ai_job_progress ? (ev.ai_job_progress.processed + ' photos edited') : 'done'}`;
+        const link = document.getElementById('ai-output-link');
+        if (outCode) {
+          link.href = `/event-manage.html?code=${outCode}`;
+          link.style.display = 'inline-block';
+        } else {
+          link.style.display = 'none';
+        }
+        document.getElementById('ai-status-done').style.display = 'flex';
+      } else if (status === 'FAILED') {
+        document.getElementById('ai-error-text').textContent =
+          `Failed — check worker logs`;
+        document.getElementById('ai-status-failed').style.display = 'flex';
+      }
+    }
+
+    async function refreshAIStatus() {
+      try {
+        const data = await API.get(`/api/events/${eventCode}/ai/status`);
+        if (currentEvent) {
+          currentEvent.ai_job_status = data.job ? data.job.status : null;
+          currentEvent.ai_job_progress = data.job
+            ? { processed: data.job.processed_photos, total: data.job.total_photos }
+            : null;
+          currentEvent.ai_output_event_code = data.job ? data.job.output_event_code : null;
+          updateAIStatusUI(currentEvent);
+
+          // Stop polling if terminal state reached
+          if (data.job && ['COMPLETED','FAILED','IDLE'].includes(data.job.status)) {
+            clearInterval(aiStatusInterval);
+          }
+        }
+      } catch(e) {
+        // Silently ignore polling errors
+      }
+    }
+
+    async function handleAIToggle(enabled) {
+      const workflowId = document.getElementById('ai-workflow-select').value;
+      document.getElementById('ai-workflow-row').style.display = enabled ? 'none' : 'block';
+      try {
+        const result = await API.post(`/api/events/${eventCode}/ai`, {
+          enabled,
+          workflow_id: enabled ? workflowId : undefined,
+        });
+        showAlert(document.getElementById('alert'),
+          enabled ? '✓ AI editing enabled' : '✓ AI editing disabled', 'success');
+        // Reload to get fresh status
+        await loadEvent();
+        setTimeout(() => hideAlert(document.getElementById('alert')), 3000);
+      } catch(err) {
+        showAlert(document.getElementById('alert'), 'AI toggle failed: ' + err.message);
+        // Revert toggle
+        document.getElementById('ai-toggle').checked = !enabled;
+        document.getElementById('ai-workflow-row').style.display = enabled ? 'block' : 'none';
       }
     }
 
@@ -144,7 +340,7 @@
         const codes = await API.get(`/api/events/${eventCode}/codes`);
         const tbody = document.getElementById('codes-body');
         if (!codes.length) {
-          tbody.innerHTML = `<tr><td colspan="10" class="text-muted" style="text-align:center;padding:24px;">No codes yet — create one above</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="11" class="text-muted" style="text-align:center;padding:24px;">No codes yet — create one above</td></tr>`;
           return;
         }
         tbody.innerHTML = codes.map(c => `
@@ -152,7 +348,8 @@
             <td>${c.label ? escHtml(c.label) : '<span class="text-muted">—</span>'}</td>
             <td><code style="font-size:0.85rem;">${c.code}</code></td>
             <td>${permissionBadge(c.permission)}</td>
-            <td>${c.allow_bulk_download !== false ? '<span style="color:#4ade80;font-size:0.8rem;">Allowed</span>' : '<span class="text-muted" style="font-size:0.8rem;">Off</span>'}</td>
+            <td>${c.allow_bulk_download !== false ? '<span style="color:#4ade80;font-size:0.8rem;">✓</span>' : '<span class="text-muted" style="font-size:0.8rem;">—</span>'}</td>
+            <td>${c.allow_ai_trigger ? '<span style="color:#a78bfa;font-size:0.8rem;">✓ AI</span>' : '<span class="text-muted" style="font-size:0.8rem;">—</span>'}</td>
             <td>${c.views}</td>
             <td>${c.uploads}</td>
             <td>${c.deletes}</td>
@@ -187,6 +384,7 @@
       document.getElementById('code-form').style.display = 'block';
       document.getElementById('code-form').reset();
       document.getElementById('code-bulk-dl').checked = true;
+      document.getElementById('code-ai-trigger').checked = false;
       hideAlert(document.getElementById('code-alert'));
       document.getElementById('code-modal').classList.add('active');
     }
@@ -206,6 +404,7 @@
           label:               document.getElementById('code-label').value.trim() || null,
           permission:          document.getElementById('code-perm').value,
           allow_bulk_download: document.getElementById('code-bulk-dl').checked,
+          allow_ai_trigger:    document.getElementById('code-ai-trigger').checked,
         });
         document.getElementById('new-share-url').textContent = code.share_url;
         document.getElementById('new-code-val').textContent = code.code;

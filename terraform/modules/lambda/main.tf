@@ -132,6 +132,7 @@ resource "aws_lambda_function" "api" {
       SES_SENDER_EMAIL = var.ses_sender_email
       BASE_URL         = var.base_url
       LOG_LEVEL        = "WARNING" # Suppress most logging to avoid CloudWatch costs
+      WORKER_API_KEY   = var.worker_api_key
     }
   }
 

@@ -44,3 +44,10 @@ variable "base_url" {
   type        = string
   description = "Public-facing base URL (API Gateway invoke URL)"
 }
+
+variable "worker_api_key" {
+  type        = string
+  description = "Static API key for the local ComfyUI worker to authenticate against the API"
+  sensitive   = true
+}
+

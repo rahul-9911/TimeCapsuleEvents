@@ -19,12 +19,42 @@ from db import (
     event_name_exists_for_organiser,
     count_photos,
     list_access_codes,
+    get_active_ai_job_for_event,
 )
 from storage import delete_event_photos
 from middleware import get_current_organiser
 from models import EventCreate, EventOut
 
-router = APIRouter(tags=["events"])
+def _fmt_ai_progress(job: dict | None) -> dict | None:
+    if not job:
+        return None
+    return {
+        "processed": int(job.get("processed_photos", 0)),
+        "total": int(job.get("total_photos", 0)),
+    }
+
+
+def _event_out(e: dict, photo_count: int = 0, code_count: int = 0, job: dict | None = None) -> EventOut:
+    """Build an EventOut from a raw DynamoDB event item + optional job."""
+    return EventOut(
+        event_code=e["event_code"],
+        event_name=e["event_name"],
+        description=e.get("description"),
+        event_date=e.get("event_date"),
+        retention_days=e.get("retention_days", 2),
+        status=e["status"],
+        created_at=e["created_at"],
+        expires_at=e.get("expires_at"),
+        photo_count=photo_count,
+        code_count=code_count,
+        ai_editing_enabled=e.get("ai_editing_enabled", False),
+        ai_workflow_id=e.get("ai_workflow_id") or None,
+        ai_job_id=e.get("ai_job_id") or None,
+        ai_job_status=job["status"] if job else None,
+        ai_job_progress=_fmt_ai_progress(job),
+        ai_output_event_code=job.get("output_event_code") or None if job else None,
+    )
+
 
 CODE_CHARS = string.ascii_uppercase + string.digits
 CODE_LENGTH = 6
@@ -65,16 +95,7 @@ async def create_event_endpoint(
         retention_days=body.retention_days or 2,
     )
 
-    return EventOut(
-        event_code=event["event_code"],
-        event_name=event["event_name"],
-        description=event.get("description"),
-        event_date=event.get("event_date"),
-        retention_days=event.get("retention_days", 2),
-        status=event["status"],
-        created_at=event["created_at"],
-        expires_at=event.get("expires_at"),
-    )
+    return _event_out(event)
 
 
 @router.get("", response_model=list[EventOut])
@@ -84,18 +105,8 @@ async def list_events_endpoint(organiser: dict = Depends(get_current_organiser))
     for e in events:
         photo_count = await count_photos(e["event_code"])
         codes = await list_access_codes(e["event_code"])
-        result.append(EventOut(
-            event_code=e["event_code"],
-            event_name=e["event_name"],
-            description=e.get("description"),
-            event_date=e.get("event_date"),
-            retention_days=e.get("retention_days", 2),
-            status=e["status"],
-            created_at=e["created_at"],
-            expires_at=e.get("expires_at"),
-            photo_count=photo_count,
-            code_count=len(codes),
-        ))
+        job = await get_active_ai_job_for_event(e["event_code"]) if e.get("ai_editing_enabled") else None
+        result.append(_event_out(e, photo_count=photo_count, code_count=len(codes), job=job))
     return result
 
 
@@ -110,19 +121,9 @@ async def get_event_endpoint(
 
     photo_count = await count_photos(event_code.upper())
     codes = await list_access_codes(event_code.upper())
+    job = await get_active_ai_job_for_event(event_code.upper()) if event.get("ai_editing_enabled") else None
 
-    return EventOut(
-        event_code=event["event_code"],
-        event_name=event["event_name"],
-        description=event.get("description"),
-        event_date=event.get("event_date"),
-        retention_days=event.get("retention_days", 2),
-        status=event["status"],
-        created_at=event["created_at"],
-        expires_at=event.get("expires_at"),
-        photo_count=photo_count,
-        code_count=len(codes),
-    )
+    return _event_out(event, photo_count=photo_count, code_count=len(codes), job=job)
 
 
 @router.delete("/{event_code}", status_code=204)

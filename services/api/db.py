@@ -1,6 +1,10 @@
 """
 SnapEvent — DynamoDB single-table data layer
 All metadata lives in one DynamoDB table using a composite PK/SK pattern.
+
+AI Job item types (added for ComfyUI integration):
+  PK = EVENT#{source_event_code}  SK = AIJOB#{job_id}
+  Tracks per-event AI editing jobs with photo-level processed_ids set.
 """
 import os
 import uuid
@@ -278,6 +282,7 @@ async def create_access_code(
     label: Optional[str],
     permission: str,
     allow_bulk_download: bool = True,
+    allow_ai_trigger: bool = False,
 ) -> dict:
     table = _get_table()
     code_id = _new_id()
@@ -289,6 +294,7 @@ async def create_access_code(
         "label": label or "",
         "permission": permission,
         "allow_bulk_download": allow_bulk_download if allow_bulk_download is not None else True,
+        "allow_ai_trigger": allow_ai_trigger if allow_ai_trigger is not None else False,
         "created_at": _now_iso(),
         "revoked": False,
     }
@@ -461,3 +467,242 @@ async def get_activity_summary(event_code: str) -> list[dict]:
                 code_stats[c]["last_seen"] = ts
 
     return list(code_stats.values())
+
+
+# ── AI Job Operations ────────────────────────────────────────────────────────
+
+AI_JOB_STATUSES = ("QUEUED", "PROCESSING", "IDLE", "COMPLETED", "FAILED")
+
+
+async def create_ai_job(
+    source_event_code: str,
+    organiser_email: str,
+    workflow_id: str,
+) -> dict:
+    """
+    Create an AI editing job for an event.
+    One active job per event at a time — caller must check before creating.
+    """
+    table = _get_table()
+    job_id = _new_id()
+    now = _now_iso()
+    item = {
+        "PK": f"EVENT#{source_event_code}",
+        "SK": f"AIJOB#{job_id}",
+        "job_id": job_id,
+        "status": "QUEUED",
+        "workflow_id": workflow_id,
+        "source_event_code": source_event_code,
+        "output_event_code": "",          # filled when worker creates the output event
+        "organiser_email": organiser_email,
+        "created_at": now,
+        "started_at": "",
+        "completed_at": "",
+        "total_photos": 0,
+        "processed_photos": 0,
+        "processed_photo_ids": set(),     # DynamoDB SS — grows as photos finish
+        "error": "",
+        # GSI for worker to efficiently find QUEUED/IDLE jobs across all events
+        "GSI1PK": "AIJOB",
+        "GSI1SK": f"STATUS#QUEUED#{now}#{job_id}",
+    }
+    table.put_item(Item=item)
+    return item
+
+
+async def get_ai_job(source_event_code: str, job_id: str) -> Optional[dict]:
+    table = _get_table()
+    resp = table.get_item(
+        Key={"PK": f"EVENT#{source_event_code}", "SK": f"AIJOB#{job_id}"}
+    )
+    return resp.get("Item")
+
+
+async def get_active_ai_job_for_event(event_code: str) -> Optional[dict]:
+    """
+    Return the most recent non-COMPLETED/non-FAILED AI job for an event.
+    Active = QUEUED, PROCESSING, or IDLE.
+    """
+    table = _get_table()
+    resp = table.query(
+        KeyConditionExpression=Key("PK").eq(f"EVENT#{event_code}") & Key("SK").begins_with("AIJOB#"),
+    )
+    active_statuses = {"QUEUED", "PROCESSING", "IDLE"}
+    jobs = [
+        item for item in resp.get("Items", [])
+        if item.get("status") in active_statuses
+    ]
+    if not jobs:
+        return None
+    # Return the most recently created one
+    return sorted(jobs, key=lambda j: j.get("created_at", ""), reverse=True)[0]
+
+
+async def list_pending_ai_jobs() -> list[dict]:
+    """
+    Worker endpoint: return all QUEUED or IDLE jobs, ordered by created_at.
+    Uses GSI1 with prefix scan on STATUS#QUEUED and STATUS#IDLE.
+    Falls back to full scan if needed.
+    """
+    table = _get_table()
+    results = []
+    for status in ("QUEUED", "IDLE"):
+        resp = table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=(
+                Key("GSI1PK").eq("AIJOB") &
+                Key("GSI1SK").begins_with(f"STATUS#{status}#")
+            ),
+        )
+        results.extend(resp.get("Items", []))
+    return sorted(results, key=lambda j: j.get("created_at", ""))
+
+
+async def claim_ai_job(source_event_code: str, job_id: str) -> None:
+    """
+    Worker claims a QUEUED/IDLE job → sets status=PROCESSING.
+    Also updates GSI1SK so the job no longer appears in list_pending_ai_jobs.
+    """
+    table = _get_table()
+    now = _now_iso()
+    table.update_item(
+        Key={"PK": f"EVENT#{source_event_code}", "SK": f"AIJOB#{job_id}"},
+        UpdateExpression=(
+            "SET #st = :s, started_at = if_not_exists(started_at, :now), "
+            "GSI1SK = :gsk"
+        ),
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={
+            ":s": "PROCESSING",
+            ":now": now,
+            ":gsk": f"STATUS#PROCESSING#{now}#{job_id}",
+        },
+    )
+
+
+async def update_ai_job_progress(
+    source_event_code: str,
+    job_id: str,
+    photo_id: str,
+    total_photos: int,
+) -> None:
+    """
+    Atomically mark one photo as processed.
+    Adds photo_id to the processed_photo_ids StringSet and increments counter.
+    """
+    table = _get_table()
+    table.update_item(
+        Key={"PK": f"EVENT#{source_event_code}", "SK": f"AIJOB#{job_id}"},
+        UpdateExpression=(
+            "ADD processed_photo_ids :pid, processed_photos :one "
+            "SET total_photos = :total"
+        ),
+        ExpressionAttributeValues={
+            ":pid": {photo_id},      # DynamoDB SS add
+            ":one": 1,
+            ":total": total_photos,
+        },
+    )
+
+
+async def set_ai_job_idle(
+    source_event_code: str,
+    job_id: str,
+    total_photos: int,
+) -> None:
+    """Worker sets job to IDLE after processing all current photos (waiting for new ones)."""
+    table = _get_table()
+    now = _now_iso()
+    table.update_item(
+        Key={"PK": f"EVENT#{source_event_code}", "SK": f"AIJOB#{job_id}"},
+        UpdateExpression=(
+            "SET #st = :s, total_photos = :total, GSI1SK = :gsk"
+        ),
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={
+            ":s": "IDLE",
+            ":total": total_photos,
+            ":gsk": f"STATUS#IDLE#{now}#{job_id}",
+        },
+    )
+
+
+async def complete_ai_job(
+    source_event_code: str,
+    job_id: str,
+    output_event_code: str,
+) -> None:
+    """Mark job COMPLETED (toggle turned off). output_event_code may already be set."""
+    table = _get_table()
+    now = _now_iso()
+    table.update_item(
+        Key={"PK": f"EVENT#{source_event_code}", "SK": f"AIJOB#{job_id}"},
+        UpdateExpression=(
+            "SET #st = :s, completed_at = :now, output_event_code = :oec, GSI1SK = :gsk"
+        ),
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={
+            ":s": "COMPLETED",
+            ":now": now,
+            ":oec": output_event_code,
+            ":gsk": f"STATUS#COMPLETED#{now}#{job_id}",
+        },
+    )
+
+
+async def fail_ai_job(
+    source_event_code: str,
+    job_id: str,
+    error: str,
+) -> None:
+    """Mark job FAILED with an error message."""
+    table = _get_table()
+    now = _now_iso()
+    table.update_item(
+        Key={"PK": f"EVENT#{source_event_code}", "SK": f"AIJOB#{job_id}"},
+        UpdateExpression=(
+            "SET #st = :s, completed_at = :now, #err = :e, GSI1SK = :gsk"
+        ),
+        ExpressionAttributeNames={"#st": "status", "#err": "error"},
+        ExpressionAttributeValues={
+            ":s": "FAILED",
+            ":now": now,
+            ":e": error,
+            ":gsk": f"STATUS#FAILED#{now}#{job_id}",
+        },
+    )
+
+
+async def set_ai_job_output_event(
+    source_event_code: str,
+    job_id: str,
+    output_event_code: str,
+) -> None:
+    """Worker sets the output event code once it has been created."""
+    table = _get_table()
+    table.update_item(
+        Key={"PK": f"EVENT#{source_event_code}", "SK": f"AIJOB#{job_id}"},
+        UpdateExpression="SET output_event_code = :oec",
+        ExpressionAttributeValues={":oec": output_event_code},
+    )
+
+
+async def update_event_ai_state(
+    event_code: str,
+    ai_editing_enabled: bool,
+    ai_workflow_id: str = "",
+    ai_job_id: str = "",
+) -> None:
+    """Update the AI editing fields on the event META item."""
+    table = _get_table()
+    table.update_item(
+        Key={"PK": f"EVENT#{event_code}", "SK": "META"},
+        UpdateExpression=(
+            "SET ai_editing_enabled = :en, ai_workflow_id = :wf, ai_job_id = :jid"
+        ),
+        ExpressionAttributeValues={
+            ":en": ai_editing_enabled,
+            ":wf": ai_workflow_id,
+            ":jid": ai_job_id,
+        },
+    )

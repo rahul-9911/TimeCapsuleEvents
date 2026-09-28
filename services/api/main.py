@@ -15,6 +15,7 @@ from routers.auth import router as auth_router
 from routers.events import router as events_router
 from routers.codes import router as codes_router
 from routers.participant import router as participant_router
+from routers.ai import router as ai_router
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 log_level = os.getenv("LOG_LEVEL", "WARNING").upper()
@@ -40,6 +41,10 @@ app.include_router(auth_router, prefix="/auth")
 app.include_router(events_router, prefix="/api/events")
 app.include_router(codes_router, prefix="/api/events")
 app.include_router(participant_router)
+# AI editing: organiser routes under /api/events/{code}/ai
+#             worker routes under /api/ai/worker/*
+app.include_router(ai_router, prefix="/api/events")
+app.include_router(ai_router, prefix="/api/ai", tags=["ai-worker"])
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
