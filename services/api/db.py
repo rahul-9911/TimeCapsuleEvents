@@ -555,7 +555,11 @@ async def list_pending_ai_jobs() -> list[dict]:
             ),
         )
         results.extend(resp.get("Items", []))
-    return sorted(results, key=lambda j: j.get("created_at", ""))
+    status_priority = {"QUEUED": 0, "PROCESSING": 1, "IDLE": 2}
+    return sorted(
+        results,
+        key=lambda j: (status_priority.get(j.get("status"), 9), j.get("created_at", "")),
+    )
 
 
 async def claim_ai_job(source_event_code: str, job_id: str) -> None:
