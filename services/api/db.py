@@ -500,7 +500,6 @@ async def create_ai_job(
         "completed_at": "",
         "total_photos": 0,
         "processed_photos": 0,
-        "processed_photo_ids": set(),     # DynamoDB SS — grows as photos finish
         "error": "",
         # GSI for worker to efficiently find QUEUED/IDLE jobs across all events
         "GSI1PK": "AIJOB",
