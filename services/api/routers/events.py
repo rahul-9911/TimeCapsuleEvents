@@ -25,6 +25,8 @@ from storage import delete_event_photos
 from middleware import get_current_organiser
 from models import EventCreate, EventOut
 
+router = APIRouter()
+
 def _fmt_ai_progress(job: dict | None) -> dict | None:
     if not job:
         return None
