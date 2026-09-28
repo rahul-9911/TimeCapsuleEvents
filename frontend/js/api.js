@@ -38,6 +38,8 @@ const API = {
 
   get:    (path)          => API.request('GET', path),
   post:   (path, body)    => API.request('POST', path, body),
+  patch:  (path, body)    => API.request('PATCH', path, body),
+  put:    (path, body)    => API.request('PUT', path, body),
   del:    (path)          => API.request('DELETE', path),
   upload: (path, formData)=> API.request('POST', path, formData, true),
 };

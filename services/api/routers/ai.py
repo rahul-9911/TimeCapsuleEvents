@@ -42,7 +42,10 @@ from models import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["ai"])
+
+# Two separate routers so FastAPI doesn't deduplicate when mounted at different prefixes
+router = APIRouter(tags=["ai"])          # mounted at /api/events  → /{code}/ai*
+worker_router = APIRouter(tags=["ai-worker"])  # mounted at /api/ai     → /worker/*
 
 # ── Available workflows (maps id → display name) ─────────────────────────────
 AVAILABLE_WORKFLOWS: dict[str, str] = {
@@ -91,6 +94,7 @@ def _job_out(job: dict) -> AIJobOut:
 
 # ── Organiser: toggle AI editing ──────────────────────────────────────────────
 
+@router.post("/{event_code}/ai")
 @router.patch("/{event_code}/ai")
 async def toggle_ai_editing(
     event_code: str,
