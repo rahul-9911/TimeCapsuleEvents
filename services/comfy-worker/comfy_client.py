@@ -159,6 +159,7 @@ class ComfyClient:
         """
         deadline = time.time() + self.timeout
         logger.info(f"Polling ComfyUI for prompt_id={prompt_id}")
+        missing_count = 0
 
         while time.time() < deadline:
             resp = requests.get(
@@ -168,6 +169,7 @@ class ComfyClient:
             history = resp.json()
 
             if prompt_id in history:
+                missing_count = 0
                 item = history[prompt_id]
                 status = item.get("status", {})
                 if status.get("completed"):
@@ -176,6 +178,30 @@ class ComfyClient:
                 if status.get("status_str") == "error":
                     msgs = status.get("messages", [])
                     raise RuntimeError(f"ComfyUI execution error: {msgs}")
+            else:
+                # Check if prompt is active in ComfyUI queue
+                try:
+                    q_resp = requests.get(f"{self.base_url}/queue", timeout=5)
+                    if q_resp.ok:
+                        q_data = q_resp.json()
+                        running = q_data.get("queue_running", [])
+                        pending = q_data.get("queue_pending", [])
+                        in_queue = any(
+                            item[1] == prompt_id
+                            for item in running + pending
+                            if isinstance(item, list) and len(item) > 1
+                        )
+                        if not in_queue:
+                            missing_count += 1
+                            if missing_count >= 3:
+                                raise RuntimeError(
+                                    f"Prompt {prompt_id} is no longer in ComfyUI queue or history (ComfyUI restarted or task dropped)"
+                                )
+                        else:
+                            missing_count = 0
+                except Exception as q_err:
+                    if isinstance(q_err, RuntimeError):
+                        raise q_err
 
             time.sleep(self.poll_interval)
 

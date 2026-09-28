@@ -272,7 +272,7 @@ async def worker_claim_job(job_id: str, request: Request):
     job = await get_ai_job(source_event_code, job_id)
     if not job:
         raise HTTPException(404, f"Job {job_id} not found")
-    if job["status"] not in ("QUEUED", "IDLE"):
+    if job["status"] not in ("QUEUED", "IDLE", "PROCESSING"):
         raise HTTPException(409, f"Job is already in status '{job['status']}', cannot claim")
 
     await claim_ai_job(source_event_code, job_id)

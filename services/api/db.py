@@ -540,13 +540,13 @@ async def get_active_ai_job_for_event(event_code: str) -> Optional[dict]:
 
 async def list_pending_ai_jobs() -> list[dict]:
     """
-    Worker endpoint: return all QUEUED or IDLE jobs, ordered by created_at.
-    Uses GSI1 with prefix scan on STATUS#QUEUED and STATUS#IDLE.
+    Worker endpoint: return all QUEUED, IDLE, or PROCESSING jobs, ordered by created_at.
+    Uses GSI1 with prefix scan on STATUS#QUEUED, STATUS#IDLE, and STATUS#PROCESSING.
     Falls back to full scan if needed.
     """
     table = _get_table()
     results = []
-    for status in ("QUEUED", "IDLE"):
+    for status in ("QUEUED", "IDLE", "PROCESSING"):
         resp = table.query(
             IndexName="GSI1",
             KeyConditionExpression=(
