@@ -270,7 +270,7 @@
         const processed = p.processed || 0;
         const total = p.total || '?';
         document.getElementById('ai-progress-text').textContent =
-          `Processing… ${processed} of ${total} photos done`;
+          `Processing photo ${Math.min(processed + 1, total)} of ${total} (${processed} done)…`;
         document.getElementById('ai-status-processing').style.display = 'flex';
       } else if (status === 'IDLE') {
         document.getElementById('ai-status-idle').style.display = 'flex';
