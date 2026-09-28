@@ -324,7 +324,7 @@ async def worker_report_progress_full(
                 event_name=out_name,
                 description=f"AI edited photos from event {code}",
                 event_date=source_event.get("event_date"),
-                retention_days=source_event.get("retention_days", 2),
+                retention_days=int(source_event.get("retention_days", 2)),
             )
             # Create default access code for the new output event
             await create_access_code(

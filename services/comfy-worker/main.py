@@ -230,8 +230,16 @@ def process_job(
 
             except Exception as e:
                 logger.error(f"  ✗ Photo {photo_id} failed: {e}", exc_info=True)
-                # Don't fail the whole job for one photo — skip and continue
-                # The photo_id is NOT added to processed_photo_ids, so it will retry
+                # Mark photo as processed on job so worker does not retry this broken image endlessly
+                res = api.report_progress(
+                    source_event_code=source_event_code,
+                    job_id=job_id,
+                    photo_id=photo_id,
+                    total_photos=total_photos,
+                    output_event_code=output_event_code,
+                )
+                if isinstance(res, dict) and res.get("output_event_code"):
+                    output_event_code = res["output_event_code"]
                 continue
 
     # ── All photos in this batch done ─────────────────────────────────────────

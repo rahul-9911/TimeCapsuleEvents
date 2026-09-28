@@ -170,7 +170,8 @@ async def create_event(
     now = datetime.now(timezone.utc)
 
     # Retention days clamped between 1 and 14 days (default 2 days)
-    days = max(1, min(retention_days if retention_days is not None else 2, 14))
+    days_val = int(retention_days) if retention_days is not None else 2
+    days = max(1, min(days_val, 14))
     expires_at = now + timedelta(days=days)
 
     event_item = {
