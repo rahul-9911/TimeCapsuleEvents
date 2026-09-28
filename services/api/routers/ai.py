@@ -77,6 +77,12 @@ async def require_worker_key(x_worker_api_key: str = Header(..., alias="X-Worker
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _job_out(job: dict) -> AIJobOut:
+    raw_ids = job.get("processed_photo_ids") or []
+    if isinstance(raw_ids, (set, list)):
+        processed_ids = list(raw_ids)
+    else:
+        processed_ids = []
+
     return AIJobOut(
         job_id=job["job_id"],
         status=job["status"],
@@ -88,6 +94,7 @@ def _job_out(job: dict) -> AIJobOut:
         completed_at=job.get("completed_at") or None,
         total_photos=int(job.get("total_photos", 0)),
         processed_photos=int(job.get("processed_photos", 0)),
+        processed_photo_ids=processed_ids,
         error=job.get("error") or None,
     )
 
@@ -293,19 +300,62 @@ async def worker_report_progress_full(
 ):
     """
     Worker reports one photo processed. Atomically updates processed_photo_ids set.
-    If output_event_code provided (first photo), sets it on the job.
+    If output_event_code not set yet, creates the output event automatically.
+    Registers the newly generated photo record under output_event_code.
     """
     code = source_event_code.upper()
     job = await get_ai_job(code, job_id)
     if not job:
         raise HTTPException(404, f"Job {job_id} not found for event {code}")
 
-    # Set output event code on first photo if provided
-    if body.output_event_code and not job.get("output_event_code"):
+    output_event_code = body.output_event_code or job.get("output_event_code")
+    if not output_event_code:
+        # Auto-create output event on first photo
+        from db import create_event, create_access_code, event_code_exists
+        from routers.events import _unique_code
+        source_event = await get_event(code)
+        if source_event:
+            out_code = await _unique_code()
+            wf_name = AVAILABLE_WORKFLOWS.get(job.get("workflow_id", ""), "AI Edited")
+            out_name = f"{source_event['event_name']} ({wf_name})"
+            await create_event(
+                email=source_event["organiser_email"],
+                event_code=out_code,
+                event_name=out_name,
+                description=f"AI edited photos from event {code}",
+                event_date=source_event.get("event_date"),
+                retention_days=source_event.get("retention_days", 2),
+            )
+            # Create default access code for the new output event
+            await create_access_code(
+                event_code=out_code,
+                code=out_code,
+                label="Full Access",
+                permission="VIEW_UPLOAD_DELETE",
+            )
+            await set_ai_job_output_event(code, job_id, out_code)
+            output_event_code = out_code
+    elif body.output_event_code and not job.get("output_event_code"):
         await set_ai_job_output_event(code, job_id, body.output_event_code)
 
+    # Save photo record in DynamoDB under output event
+    if body.output_photo_id and body.output_s3_key and output_event_code:
+        from db import create_photo_record
+        await create_photo_record(
+            event_code=output_event_code,
+            photo_id=body.output_photo_id,
+            s3_key=body.output_s3_key,
+            original_name=body.original_name or "edited_photo.png",
+            content_type=body.content_type or "image/png",
+            access_code="AI",
+        )
+
     await update_ai_job_progress(code, job_id, body.photo_id, body.total_photos)
-    return {"message": "Progress recorded", "photo_id": body.photo_id}
+    return {
+        "message": "Progress recorded",
+        "photo_id": body.photo_id,
+        "output_event_code": output_event_code,
+    }
 
 
 @router.post(

@@ -65,22 +65,36 @@ class SnapEventAPIClient:
         photo_id: str,
         total_photos: int,
         output_event_code: Optional[str] = None,
-    ) -> bool:
+        output_photo_id: Optional[str] = None,
+        output_s3_key: Optional[str] = None,
+        original_name: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> dict:
         """
         Report one photo processed. Atomically updates DynamoDB processed_photo_ids set.
+        Returns response dict containing updated output_event_code.
         """
         try:
             body: dict = {"photo_id": photo_id, "total_photos": total_photos}
             if output_event_code:
                 body["output_event_code"] = output_event_code
-            self._post(
+            if output_photo_id:
+                body["output_photo_id"] = output_photo_id
+            if output_s3_key:
+                body["output_s3_key"] = output_s3_key
+            if original_name:
+                body["original_name"] = original_name
+            if content_type:
+                body["content_type"] = content_type
+
+            resp = self._post(
                 f"/api/ai/worker/jobs/{source_event_code}/{job_id}/progress",
                 body,
             )
-            return True
+            return resp if isinstance(resp, dict) else {}
         except requests.HTTPError as e:
             logger.error(f"Failed to report progress for job {job_id}: {e}")
-            return False
+            return {}
 
     def set_idle(
         self,

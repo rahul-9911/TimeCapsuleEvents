@@ -203,15 +203,21 @@ def process_job(
                 )
 
                 # 4. Report progress to API
-                # On first photo, output_event_code is None — API will create the event
-                # and return the code. We pass None and the API handles creation.
-                api.report_progress(
+                # Pass photo metadata so API creates output photo record in DynamoDB.
+                # On first photo, API auto-creates the output event and returns its code.
+                res = api.report_progress(
                     source_event_code=source_event_code,
                     job_id=job_id,
                     photo_id=photo_id,
                     total_photos=total_photos,
                     output_event_code=output_event_code,
+                    output_photo_id=output_photo_id,
+                    output_s3_key=output_s3_key,
+                    original_name=original_name,
+                    content_type=output_content_type,
                 )
+                if isinstance(res, dict) and res.get("output_event_code"):
+                    output_event_code = res["output_event_code"]
 
                 # Clean up local output file
                 try:

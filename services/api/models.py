@@ -128,6 +128,7 @@ class AIJobOut(BaseModel):
     completed_at: Optional[str] = None
     total_photos: int = 0
     processed_photos: int = 0
+    processed_photo_ids: list[str] = []
     error: Optional[str] = None
 
 
@@ -143,6 +144,10 @@ class WorkerProgressRequest(BaseModel):
     photo_id: str
     total_photos: int
     output_event_code: Optional[str] = None  # set on first photo if not already set
+    output_photo_id: Optional[str] = None
+    output_s3_key: Optional[str] = None
+    original_name: Optional[str] = None
+    content_type: Optional[str] = None
 
 
 class WorkerIdleRequest(BaseModel):
