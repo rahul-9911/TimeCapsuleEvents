@@ -40,6 +40,13 @@ Built with pure HTML/CSS and Vanilla JavaScript. No build step (React/Vue/Webpac
 - **`api.js`:** A lightweight wrapper around `fetch` that handles JSON parsing, error throwing, and cookie credentials.
 - **Gallery (`gallery.html`):** Custom-built responsive image gallery. Uses Presigned URLs provided by the API to load images securely and efficiently.
 
+### 2.4 The ComfyUI AI Processing Worker (`services/comfy-worker/`)
+An asynchronous background worker running alongside a local ComfyUI engine (e.g. on a local GPU workstation).
+- **Decoupled Architecture:** The serverless cloud infrastructure (Lambda, DynamoDB, API Gateway) offloads heavy GPU-based generative image processing to local hardware without maintaining expensive cloud GPU instances.
+- **Secure Authentication:** Communicates with API Gateway using a dedicated `X-Worker-Api-Key` header.
+- **Atomic Batch Processing:** Worker polls `GET /api/ai/worker/queue`, claims jobs, downloads source photos from S3, processes them locally through ComfyUI workflows, and streams outputs back to S3.
+- **Progress Synchronization:** Calls `POST /api/ai/worker/jobs/{source_event}/{job_id}/progress` to update the job's `processed_photo_ids` set in DynamoDB atomically per photo, automatically spawning the output event upon first successful completion.
+
 ---
 
 ## 3. Data Storage (DynamoDB Single-Table Design)

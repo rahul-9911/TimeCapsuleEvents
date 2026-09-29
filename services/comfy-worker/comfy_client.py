@@ -99,6 +99,11 @@ class ComfyClient:
         for node in nodes:
             node_id = str(node["id"])
             class_type = node.get("type", "")
+
+            # Skip UI-only documentation/note/comparer nodes
+            if class_type in {"MarkdownNote", "Note", "Image Comparer (rgthree)"}:
+                continue
+
             inputs = {}
 
             # Process widget inputs (non-linked values)

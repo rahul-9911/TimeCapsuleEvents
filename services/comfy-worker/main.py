@@ -60,7 +60,7 @@ WORKFLOWS_DIR = Path(__file__).parent / "workflows"
 # Map workflow_id → JSON filename in workflows/
 WORKFLOW_FILES: dict[str, str] = {
     "seedvr2_upscale": "seedvr2_upscale.json",
-    # Add more as you add workflow JSON files
+    "flux2_klein_detailer": "flux2_klein_detailer.json",
 }
 
 

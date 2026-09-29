@@ -86,6 +86,7 @@ For a deep dive into the single-table DynamoDB design and data lifecycle, see [A
 | Object Storage | Amazon S3 |
 | Email | Amazon SES |
 | Background Jobs | Amazon EventBridge Scheduler |
+| AI Processing Worker | ComfyUI + Python Client Worker (`services/comfy-worker`) |
 | IaC | Terraform (S3 native state locking) |
 | Frontend | Vanilla HTML/CSS/JS |
 
@@ -97,15 +98,22 @@ For a deep dive into the single-table DynamoDB design and data lifecycle, see [A
 TimeCapsuleEvents/
 │
 ├── services/
-│   └── api/                   # Core backend application
-│       ├── main.py            # FastAPI app + Mangum Lambda handler
-│       ├── cleanup.py         # Hourly EventBridge Lambda handler
-│       ├── db.py              # DynamoDB operations
-│       ├── storage.py         # S3 operations (presigned URLs)
-│       ├── mailer.py          # SES email sending
-│       ├── middleware.py      # Session auth
-│       ├── models.py          # Pydantic schemas
-│       └── routers/           # API routes
+│   ├── api/                   # Core backend application
+│   │   ├── main.py            # FastAPI app + Mangum Lambda handler
+│   │   ├── cleanup.py         # Hourly EventBridge Lambda handler
+│   │   ├── db.py              # DynamoDB operations
+│   │   ├── storage.py         # S3 operations (presigned URLs)
+│   │   ├── mailer.py          # SES email sending
+│   │   ├── middleware.py      # Session auth
+│   │   ├── models.py          # Pydantic schemas
+│   │   └── routers/           # API routes
+│   │
+│   └── comfy-worker/          # Async ComfyUI AI processing worker
+│       ├── main.py            # Polling loop & worker engine
+│       ├── comfy_client.py    # ComfyUI REST/WebSocket client
+│       ├── api_client.py      # SnapEvent Cloud API client
+│       ├── s3_client.py       # S3 image downloader & uploader
+│       └── workflows/         # ComfyUI API format workflow JSON files
 │
 ├── frontend/                  # Plain HTML/CSS/JS (no build step)
 │   ├── login.html             # Organiser login
@@ -132,6 +140,81 @@ TimeCapsuleEvents/
 ├── ARCHITECTURE.md
 └── README.md
 ```
+
+---
+
+## ComfyUI AI Worker Setup & Running
+
+The ComfyUI worker runs locally alongside ComfyUI, polling the API Gateway for queued jobs, downloading source photos from S3, processing them, and uploading enhanced outputs.
+
+For full worker documentation, see [services/comfy-worker/README.md](file:///home/rahul/projects/facerecog/services/comfy-worker/README.md).
+
+### 1. How to Run the Worker
+
+```bash
+cd services/comfy-worker
+./venv/bin/python main.py
+```
+
+To run continuously in the background:
+```bash
+cd services/comfy-worker
+nohup ./venv/bin/python main.py > worker.log 2>&1 &
+```
+
+### 2. Editing Variables (`services/comfy-worker/.env`)
+
+Edit `services/comfy-worker/.env` to adjust configuration:
+
+- **API Endpoint & Keys**:
+  - `SNAPEVENT_API_URL`: Base URL of API Gateway (e.g. `https://your-api.execute-api.region.amazonaws.com`)
+  - `WORKER_API_KEY`: Key matching `WORKER_API_KEY` on Lambda.
+  - `S3_BUCKET`: Target S3 bucket name (e.g. `snapevent-dev-photos`)
+- **ComfyUI Local Address**:
+  - `COMFYUI_URL`: Local server address (`http://localhost:8188`)
+- **Polling Frequency & Timeouts**:
+  - `POLL_INTERVAL_SECONDS`: API queue polling frequency in seconds (default: `30`).
+  - `COMFY_POLL_INTERVAL`: ComfyUI prompt status polling frequency in seconds (default: `3.0`).
+  - `COMFY_TIMEOUT`: Timeout per image in seconds (default: `600.0`).
+
+### 3. Adding or Changing Workflows
+
+To add a new workflow to both local worker and cloud UI:
+
+1. **Place JSON File**: Copy or export your workflow JSON into `services/comfy-worker/workflows/my_new_workflow.json`.
+2. **Register in Worker (`services/comfy-worker/main.py`)**:
+   ```python
+   WORKFLOW_FILES: dict[str, str] = {
+       "seedvr2_upscale": "seedvr2_upscale.json",
+       "flux2_klein_detailer": "flux2_klein_detailer.json",
+       "my_new_workflow": "my_new_workflow.json",  # <-- Add here
+   }
+   ```
+3. **Register in API Backend (`services/api/routers/ai.py`)**:
+   ```python
+   AVAILABLE_WORKFLOWS: dict[str, str] = {
+       "seedvr2_upscale": "SeedVR2 4x Upscale",
+       "flux2_klein_detailer": "Flux2-Klein Image Detailer Best",
+       "my_new_workflow": "My New Workflow Display Name",  # <-- Add here
+   }
+   ```
+4. **Add Dropdown Option in Frontend (`frontend/event-manage.html`)**:
+   ```html
+   <select id="ai-workflow-select" style="width:100%;max-width:320px;">
+     <option value="seedvr2_upscale">SeedVR2 4x Upscale</option>
+     <option value="flux2_klein_detailer">Flux2-Klein Image Detailer Best</option>
+     <option value="my_new_workflow">My New Workflow Display Name</option>
+   </select>
+   ```
+5. **Restart Local Worker**:
+   ```bash
+   cd services/comfy-worker
+   ./venv/bin/python main.py
+   ```
+6. **Deploy Updates Online to AWS Lambda**:
+   ```bash
+   make update-lambda env=dev TAG=v4
+   ```
 
 ---
 

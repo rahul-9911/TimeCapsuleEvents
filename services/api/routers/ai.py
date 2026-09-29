@@ -50,7 +50,7 @@ worker_router = APIRouter(tags=["ai-worker"])  # mounted at /api/ai     → /wor
 # ── Available workflows (maps id → display name) ─────────────────────────────
 AVAILABLE_WORKFLOWS: dict[str, str] = {
     "seedvr2_upscale": "SeedVR2 4x Upscale",
-    # Add more here as you add workflow JSON files to the worker
+    "flux2_klein_detailer": "Flux2-Klein Image Detailer Best",
 }
 
 
