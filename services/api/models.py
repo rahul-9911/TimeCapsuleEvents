@@ -75,6 +75,7 @@ class CodeOut(BaseModel):
 class PhotoOut(BaseModel):
     id: str
     url: str
+    thumbnail_url: Optional[str] = None  # Small JPEG for gallery grid; falls back to url
     download_url: str
     original_name: Optional[str] = None
     content_type: str = "image/jpeg"

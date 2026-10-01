@@ -6,6 +6,7 @@ POST /e/{code}/photos           → upload photo
 GET  /e/{code}/photos/{id}/url  → get presigned download URL
 DELETE /e/{code}/photos/{id}    → delete photo
 """
+import logging
 import os
 from typing import Optional
 
@@ -20,9 +21,19 @@ from db import (
     delete_photo_record,
     log_activity,
     get_access_code,
+    find_photo_by_name,
+    set_photo_thumbnail_key,
 )
-from storage import generate_presigned_post, delete_photo, get_presigned_url
+from storage import (
+    generate_presigned_post,
+    delete_photo,
+    get_presigned_url,
+    generate_thumbnail,
+    get_thumbnail_url,
+)
 from models import PhotoOut, UploadUrlRequest, UploadConfirmRequest, BatchDeleteRequest
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["participant"])
 PERMISSIONS = {
@@ -35,7 +46,7 @@ ALLOWED_CONTENT_TYPES = {
     "image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic",
 }
 
-MAX_FILE_SIZE_MB = 20
+MAX_FILE_SIZE_MB = 40
 
 
 async def _resolve_participant(request: Request) -> dict:
@@ -103,9 +114,14 @@ async def list_photos_endpoint(code: str, request: Request):
         uploader_code = p.get("access_code", "")
         uploader_ac = await get_access_code(event_code, uploader_code) if uploader_code else None
 
+        # Always generate thumbnail URL — frontend onerror handler will
+        # gracefully fall back to full-res for old photos without thumbnails
+        thumb_url = get_thumbnail_url(event_code, p["id"])
+
         result.append(PhotoOut(
             id=p["id"],
             url=get_presigned_url(p["s3_key"]),
+            thumbnail_url=thumb_url,
             download_url=get_presigned_url(p["s3_key"], download_filename=p.get("original_name")),
             original_name=p.get("original_name"),
             content_type=p.get("content_type", "image/jpeg"),
@@ -131,6 +147,17 @@ async def get_upload_url_endpoint(
         raise HTTPException(415, f"Unsupported file type: {body.content_type}")
 
     event_code = ac["event_code"]
+
+    # ── Dedup check: skip if filename already exists in this event ──────
+    existing = await find_photo_by_name(event_code, body.filename)
+    if existing:
+        return {
+            "skipped": True,
+            "existing_photo_id": existing["id"],
+            "reason": "duplicate",
+            "original_name": body.filename,
+        }
+
     photo_id, s3_key, presigned_data = generate_presigned_post(
         event_code=event_code,
         filename=body.filename or "photo.jpg",
@@ -171,13 +198,21 @@ async def confirm_upload_endpoint(
     ip = request.client.host if request.client else None
     await log_activity(event_code, ac["code"], "UPLOAD", photo_id=body.photo_id, ip_address=ip)
 
+    # ── Generate thumbnail asynchronously (non-blocking on failure) ─────
+    thumb_key = await generate_thumbnail(event_code, body.photo_id, body.s3_key)
+    thumb_url = None
+    if thumb_key:
+        await set_photo_thumbnail_key(event_code, body.photo_id, thumb_key)
+        thumb_url = get_thumbnail_url(event_code, body.photo_id)
+
     return {
         "id": body.photo_id,
         "url": get_presigned_url(body.s3_key),
+        "thumbnail_url": thumb_url,
         "download_url": get_presigned_url(body.s3_key, download_filename=body.original_name),
         "original_name": body.original_name,
         "content_type": body.content_type,
-        "uploaded_at": None, # Will be set by client or DB read
+        "uploaded_at": None,
     }
 
 

@@ -32,10 +32,12 @@
 
 **For participants:**
 - Enter your code at the event URL
-- Browse all photos in a gallery
-- Upload your own photos (if your code permits)
+- Browse photos in an optimized thumbnail gallery (400px JPEG thumbnails, saving bandwidth)
+- Upload photos up to 40MB each (batch uploads up to 200 files with 5x concurrency & 3x retries)
+- Automatic deduplication (skips re-uploading files that already exist in the event)
+- Detailed upload summary showing success, skipped duplicates, and per-file S3 error messages
 - Delete photos (if your code permits)
-- Download any photo securely via S3 Presigned URLs
+- View or download full-resolution photos securely via S3 Presigned URLs
 
 ---
 
@@ -81,14 +83,14 @@ For a deep dive into the single-table DynamoDB design and data lifecycle, see [A
 |-----------|------------|
 | Routing | API Gateway (HTTP API) |
 | Compute | AWS Lambda (Python 3.12, Container Image) |
-| Web Framework | FastAPI + Mangum |
+| Web Framework | FastAPI + Mangum + Pillow (Thumbnail generation) |
 | Database | Amazon DynamoDB (On-Demand, Single-Table) |
-| Object Storage | Amazon S3 |
+| Object Storage | Amazon S3 (Originals + `thumbs/` 400px JPEGs) |
 | Email | Amazon SES |
 | Background Jobs | Amazon EventBridge Scheduler |
 | AI Processing Worker | ComfyUI + Python Client Worker (`services/comfy-worker`) |
 | IaC | Terraform (S3 native state locking) |
-| Frontend | Vanilla HTML/CSS/JS |
+| Frontend | Vanilla HTML/CSS/JS (Concurrency pool upload, graceful thumbnail fallback) |
 
 ---
 

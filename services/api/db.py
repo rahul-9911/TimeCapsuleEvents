@@ -396,6 +396,16 @@ async def delete_photo_record(event_code: str, photo_id: str) -> None:
     table.delete_item(Key={"PK": f"EVENT#{event_code}", "SK": f"PHOTO#{photo_id}"})
 
 
+async def set_photo_thumbnail_key(event_code: str, photo_id: str, thumbnail_s3_key: str) -> None:
+    """Store the thumbnail S3 key on the photo record after thumbnail generation."""
+    table = _get_table()
+    table.update_item(
+        Key={"PK": f"EVENT#{event_code}", "SK": f"PHOTO#{photo_id}"},
+        UpdateExpression="SET thumbnail_s3_key = :tk",
+        ExpressionAttributeValues={":tk": thumbnail_s3_key},
+    )
+
+
 async def count_photos(event_code: str) -> int:
     table = _get_table()
     resp = table.query(
@@ -403,6 +413,23 @@ async def count_photos(event_code: str) -> int:
         Select="COUNT",
     )
     return resp.get("Count", 0)
+
+
+async def find_photo_by_name(event_code: str, original_name: str) -> Optional[dict]:
+    """
+    Find a photo record by its original filename within an event.
+    Used for duplicate detection — if a file with the same name already
+    exists, the upload can be skipped to avoid duplicates.
+    Returns the photo record dict, or None if not found.
+    """
+    table = _get_table()
+    resp = table.query(
+        KeyConditionExpression=Key("PK").eq(f"EVENT#{event_code}") & Key("SK").begins_with("PHOTO#"),
+    )
+    for item in resp.get("Items", []):
+        if item.get("original_name") == original_name:
+            return item
+    return None
 
 
 # ── Activity Log Operations ──────────────────────────────────────────────────

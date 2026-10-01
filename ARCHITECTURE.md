@@ -27,18 +27,22 @@ Built with **FastAPI** and wrapped by **Mangum** to run on AWS Lambda.
 - **Data Layer (`db.py`):** Uses `boto3` to interact with DynamoDB. Replaces both the old PostgreSQL control plane database and the isolated SQLite event databases.
 - **Authentication (`routers/auth.py`):** Passwordless magic-link authentication using SES. Generates a secure token stored with a TTL in DynamoDB. Clicking the link creates a session cookie.
 - **Event Registry (`routers/events.py`):** Events are now just metadata records in DynamoDB. There is no longer a need to "spawn" or orchestrate containers. Events are instantly active upon creation.
-- **Storage Layer (`storage.py`):** Uploads directly to S3. Generates short-lived AWS v4 Presigned URLs that allow the participant's browser to download/view images directly from S3. The Lambda function never streams image bytes through its own memory for downloads.
+- **Storage Layer (`storage.py`):** Direct-to-S3 uploads via presigned POST requests up to 40MB (`MAX_FILE_SIZE_MB = 40`). Includes automatic deduplication (`find_photo_by_name`) to skip existing files. Upon upload confirmation (`POST /confirm`), Lambda asynchronously generates an optimized 400px JPEG thumbnail using Pillow and uploads it to `events/{code}/thumbs/{photo_id}.jpg`. `get_thumbnail_url()` generates short-lived presigned GET URLs for fast gallery rendering without streaming full resolution images through Lambda.
 
 ### 2.2 The Cleanup Lambda (`services/api/cleanup.py`)
 - Scheduled via **Amazon EventBridge** to run every hour.
 - Scans the DynamoDB table for events whose `expires_at` timestamp is in the past.
-- Automatically purges all associated S3 photos and DynamoDB records for expired events, ensuring data privacy and minimizing storage costs.
+- Automatically purges all associated S3 photos, thumbnails, and DynamoDB records for expired events, ensuring data privacy and minimizing storage costs.
 
 ### 2.3 The Frontend (`frontend/`)
 Built with pure HTML/CSS and Vanilla JavaScript. No build step (React/Vue/Webpack) is used to keep the MVP simple.
 - **Static Hosting:** Currently served by the FastAPI Lambda itself via `StaticFiles`.
 - **`api.js`:** A lightweight wrapper around `fetch` that handles JSON parsing, error throwing, and cookie credentials.
-- **Gallery (`gallery.html`):** Custom-built responsive image gallery. Uses Presigned URLs provided by the API to load images securely and efficiently.
+- **Gallery (`gallery.html`):** Custom-built responsive image gallery:
+  - **Thumbnail Grid:** Renders 400px JPEG thumbnails for fast page loads; uses `onerror` handler to fall back seamlessly to full-res original photos for legacy images uploaded without thumbnails.
+  - **Chunked Concurrency Upload Pool:** Processes batch uploads (up to 200 files per selection) with 5 parallel workers (`UPLOAD_CONCURRENCY = 5`).
+  - **Exponential Backoff Retries:** Automatically retries transient S3 POST network failures up to 3 times with exponential delay.
+  - **Error & Deduplication Diagnostics:** Parses S3 XML response payloads to report specific error messages, tracking skipped duplicates (`✔ X uploaded · ⏭ Y skipped · ✘ Z failed`).
 
 ### 2.4 The ComfyUI AI Processing Worker (`services/comfy-worker/`)
 An asynchronous background worker running alongside a local ComfyUI engine (e.g. on a local GPU workstation).
@@ -64,7 +68,7 @@ All application state is stored in a single DynamoDB table.
 3. **Session:** `PK = ORG#<email>`, `SK = SESSION#<token>` (Uses native DynamoDB TTL)
 4. **Event Metadata:** `PK = EVENT#<event_code>`, `SK = META`
 5. **Access Code:** `PK = EVENT#<event_code>`, `SK = ACCESS#<code>`
-6. **Photo:** `PK = EVENT#<event_code>`, `SK = PHOTO#<photo_id>`
+6. **Photo:** `PK = EVENT#<event_code>`, `SK = PHOTO#<photo_id>` (Fields: `photo_id`, `event_code`, `original_name`, `s3_key`, `thumbnail_s3_key`, `size`, `uploaded_at`)
 7. **Activity Log:** `PK = EVENT#<event_code>`, `SK = LOG#<timestamp>#<id>`
 
 ---

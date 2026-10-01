@@ -186,9 +186,12 @@
         const isSelected = selectedPhotoIds.has(photo.id);
         const item = document.createElement('div');
         item.className = `gallery__item ${isSelected ? 'selected' : ''}`;
+        // Use thumbnail_url for grid (much smaller ~30KB), fall back to full url
+        const gridSrc = photo.thumbnail_url || photo.url;
         item.innerHTML = `
           <input type="checkbox" class="photo-checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleSelectPhoto('${photo.id}')">
-          <img src="${photo.url}" alt="${escHtml(photo.original_name || 'Photo')}" loading="lazy">
+          <img src="${gridSrc}" alt="${escHtml(photo.original_name || 'Photo')}" loading="lazy"
+               onerror="if(this.dataset.fallback!=='1'){this.dataset.fallback='1';this.src='${photo.url}';}">
           <div class="gallery__overlay">
             <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation();openLightbox('${photo.id}')">View</button>
             ${permission === 'VIEW_UPLOAD_DELETE'
@@ -284,47 +287,148 @@
     }
 
     // ── Upload ─────────────────────────────────────────────────────────────
+    const UPLOAD_CONCURRENCY = 5;   // Parallel uploads at a time
+    const MAX_RETRIES = 3;          // Retries per file on failure
+    const MAX_BATCH_SIZE = 200;     // Max files per batch
+
+    async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function uploadSingleFile(file, evCode) {
+      // Step 1: Get presigned URL (with dedup check)
+      const urlRes = await ParticipantAPI.post(`/e/${evCode}/photos/upload-url`, {
+        filename: file.name,
+        content_type: file.type || 'image/jpeg',
+      });
+
+      // Server detected duplicate — skip this file
+      if (urlRes.skipped) {
+        return { status: 'skipped', name: file.name, reason: urlRes.reason };
+      }
+
+      // Step 2: Upload to S3 via presigned POST
+      const fd = new FormData();
+      Object.keys(urlRes.fields).forEach(k => fd.append(k, urlRes.fields[k]));
+      fd.append('file', file);
+
+      const s3Res = await fetch(urlRes.url, { method: 'POST', body: fd });
+      if (!s3Res.ok) {
+        let errMsg = `S3 upload failed (HTTP ${s3Res.status})`;
+        try {
+          const errText = await s3Res.text();
+          const match = errText.match(/<Message>(.*?)<\/Message>/);
+          if (match) errMsg += `: ${match[1]}`;
+          else if (s3Res.status === 400) errMsg += ' — file may exceed 20MB size limit';
+        } catch(_) {}
+        throw new Error(errMsg);
+      }
+
+      // Step 3: Confirm upload
+      const confirmRes = await ParticipantAPI.post(`/e/${evCode}/photos/confirm`, {
+        photo_id: urlRes.photo_id,
+        s3_key: urlRes.s3_key,
+        original_name: file.name,
+        content_type: file.type || 'image/jpeg',
+      });
+
+      return { status: 'uploaded', name: file.name, photo: { ...confirmRes, uploaded_at: new Date().toISOString() } };
+    }
+
+    async function uploadWithRetry(file, evCode, maxRetries) {
+      let lastError = null;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          return await uploadSingleFile(file, evCode);
+        } catch (err) {
+          lastError = err;
+          if (attempt < maxRetries) {
+            await sleep(1000 * Math.pow(2, attempt - 1)); // 1s, 2s, 4s backoff
+          }
+        }
+      }
+      return { status: 'failed', name: file.name, error: lastError?.message || 'Unknown error' };
+    }
+
     async function uploadFiles(files) {
       if (!files.length) return;
+
+      // Enforce batch size limit
+      if (files.length > MAX_BATCH_SIZE) {
+        showAlert(document.getElementById('alert'),
+          `Please select at most ${MAX_BATCH_SIZE} photos per batch. You selected ${files.length}.`);
+        return;
+      }
+
       const progress = document.getElementById('upload-progress');
       const fill     = document.getElementById('upload-fill');
       const status   = document.getElementById('upload-status');
       progress.classList.add('show');
-      showAlert(status, `Uploading ${files.length} photo${files.length > 1 ? 's' : ''}…`, 'info');
 
-      let done = 0;
-      for (const file of files) {
-        try {
-          const urlRes = await ParticipantAPI.post(`/e/${eventCode}/photos/upload-url`, {
-            filename: file.name,
-            content_type: file.type
-          });
+      let completed = 0;
+      let uploaded = 0;
+      let skipped = 0;
+      let failed = 0;
+      const failures = [];
+      const total = files.length;
 
-          const fd = new FormData();
-          Object.keys(urlRes.fields).forEach(k => fd.append(k, urlRes.fields[k]));
-          fd.append('file', file);
+      showAlert(status, `Uploading 0 of ${total} photos…`, 'info');
 
-          const s3Res = await fetch(urlRes.url, { method: 'POST', body: fd });
-          if (!s3Res.ok) throw new Error("S3 Upload failed");
+      // ── Concurrency pool: process up to UPLOAD_CONCURRENCY files at a time ──
+      const fileQueue = [...files];
+      const workers = [];
 
-          const confirmRes = await ParticipantAPI.post(`/e/${eventCode}/photos/confirm`, {
-            photo_id: urlRes.photo_id,
-            s3_key: urlRes.s3_key,
-            original_name: file.name,
-            content_type: file.type
-          });
+      for (let i = 0; i < Math.min(UPLOAD_CONCURRENCY, fileQueue.length); i++) {
+        workers.push((async () => {
+          while (fileQueue.length > 0) {
+            const file = fileQueue.shift();
+            if (!file) break;
 
-          photos.unshift({ ...confirmRes, uploaded_at: new Date().toISOString() });
-          done++;
-          fill.style.width = `${Math.round((done / files.length) * 100)}%`;
-        } catch (err) {
-          showAlert(document.getElementById('alert'), `Failed to upload ${file.name}: ${err.message}`);
-        }
+            const result = await uploadWithRetry(file, eventCode, MAX_RETRIES);
+
+            if (result.status === 'uploaded') {
+              uploaded++;
+              photos.unshift(result.photo);
+            } else if (result.status === 'skipped') {
+              skipped++;
+            } else {
+              failed++;
+              failures.push({ name: result.name, error: result.error });
+            }
+
+            completed++;
+            fill.style.width = `${Math.round((completed / total) * 100)}%`;
+            showAlert(status,
+              `Processing ${completed} of ${total}… (✔ ${uploaded} uploaded` +
+              (skipped ? `, ⏭ ${skipped} skipped` : '') +
+              (failed ? `, ✘ ${failed} failed` : '') + ')', 'info');
+          }
+        })());
       }
 
+      await Promise.all(workers);
+
+      // ── Build final summary ──────────────────────────────────────────────
       progress.classList.remove('show');
       fill.style.width = '0%';
-      status.className = 'alert';
+
+      let summaryParts = [];
+      if (uploaded) summaryParts.push(`✔ ${uploaded} uploaded`);
+      if (skipped)  summaryParts.push(`⏭ ${skipped} skipped (already exist)`);
+      if (failed)   summaryParts.push(`✘ ${failed} failed`);
+      const summaryMsg = summaryParts.join(' · ');
+
+      if (failed > 0) {
+        const failList = failures.slice(0, 10)
+          .map(f => `${f.name}: ${f.error}`).join('\n');
+        showAlert(document.getElementById('alert'),
+          `${summaryMsg}\n\nFailed files:\n${failList}` +
+          (failures.length > 10 ? `\n…and ${failures.length - 10} more` : ''));
+      } else if (summaryMsg) {
+        showAlert(status, `Done — ${summaryMsg}`, 'info');
+        setTimeout(() => hideAlert(status), 6000);
+      } else {
+        hideAlert(status);
+      }
+
       renderGallery();
     }
 
