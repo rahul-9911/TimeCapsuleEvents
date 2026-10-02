@@ -340,7 +340,9 @@ async def worker_report_progress_full(
 
     # Save photo record in DynamoDB under output event
     if body.output_photo_id and body.output_s3_key and output_event_code:
-        from db import create_photo_record
+        from db import create_photo_record, set_photo_thumbnail_key
+        from storage import generate_thumbnail
+
         await create_photo_record(
             event_code=output_event_code,
             photo_id=body.output_photo_id,
@@ -349,6 +351,11 @@ async def worker_report_progress_full(
             content_type=body.content_type or "image/png",
             access_code="AI",
         )
+
+        # Generate thumbnail asynchronously for gallery view
+        thumb_key = await generate_thumbnail(output_event_code, body.output_photo_id, body.output_s3_key)
+        if thumb_key:
+            await set_photo_thumbnail_key(output_event_code, body.output_photo_id, thumb_key)
 
     await update_ai_job_progress(code, job_id, body.photo_id, body.total_photos)
     return {

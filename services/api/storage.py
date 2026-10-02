@@ -10,7 +10,7 @@ import logging
 
 import boto3
 from botocore.config import Config
-from PIL import Image
+from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +138,7 @@ async def generate_thumbnail(event_code: str, photo_id: str, s3_key: str) -> str
 
         # Open and resize
         img = Image.open(io.BytesIO(original_bytes))
+        img = ImageOps.exif_transpose(img)  # Auto-rotate according to EXIF orientation tag
         img = img.convert("RGB")  # Ensure JPEG-compatible (handles RGBA, P, etc.)
 
         # Calculate height preserving aspect ratio
